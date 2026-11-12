@@ -221,7 +221,8 @@
     pmap.setPaintProperty('route-bike', 'line-color', traffic);
     pmap.setPaintProperty('route-dash', 'line-color', t.dash);
     const dot = makeDot(t.walk, t.casing);
-    if (pmap.hasImage('route-dot')) pmap.updateImage('route-dot', dot);
+    if (window.Crisp) Crisp.add(pmap, 'route-dot', dot, 2);             // crisp at any screen sharpness
+    else if (pmap.hasImage('route-dot')) pmap.updateImage('route-dot', dot);
     else pmap.addImage('route-dot', dot, { pixelRatio: 0.5 });
   }
 
@@ -262,7 +263,9 @@
     const c = document.createElement('canvas'); c.width = 10; c.height = 14; c.className = 'flag';
     const g = c.getContext('2d');
     rows.forEach((r, y) => [...r].forEach((ch, x) => { if (pal[ch]) { g.fillStyle = pal[ch]; g.fillRect(x, y, 1, 1); } }));
-    return c;
+    if (!window.Crisp) return c;
+    const sharp = Crisp.canvas(c, 3); sharp.classList.add('flag');
+    return sharp;
   }
 
   window.GameRoutes = { THEMES, MODES, decodePolyline, splitByTraffic, featuresFor, stepText, computeRoute, addLayers,

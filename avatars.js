@@ -176,9 +176,11 @@
   function wrap(canvas) {
     const el = document.createElement('div');
     el.className = 'avatar';
-    canvas.style.cssText = `display:block;width:${canvas.width * SCALE}px;height:${canvas.height * SCALE}px;`
+    // Drawn at screen resolution when crisp.js is loaded, so it stays sharp on phones.
+    const c = window.Crisp ? Crisp.canvas(canvas, SCALE) : canvas;
+    c.style.cssText += `;display:block;width:${canvas.width * SCALE}px;height:${canvas.height * SCALE}px;`
       + 'image-rendering:pixelated;filter:drop-shadow(2px 3px 0 #0005);transition:transform .15s steps(1);';
-    el.appendChild(canvas);
+    el.appendChild(c);
     return el;
   }
 

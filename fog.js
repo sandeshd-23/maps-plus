@@ -42,10 +42,13 @@
     g.globalCompositeOperation = 'destination-out';
     g.fillStyle = '#000';
     const pad = 0.15;   // overlap neighbours so revealed areas join up
+    // Project all 4 corners, so squares stay correct when the map is rotated (drive mode).
     const cutCell = (i, j) => {
-      const nw = map.project([(j - pad) * CELL, (i + 1 + pad) * CELL]);
-      const se = map.project([(j + 1 + pad) * CELL, (i - pad) * CELL]);
-      g.fillRect(Math.floor(nw.x * RES), Math.floor(nw.y * RES), Math.ceil((se.x - nw.x) * RES) + 1, Math.ceil((se.y - nw.y) * RES) + 1);
+      const pts = [[j - pad, i + 1 + pad], [j + 1 + pad, i + 1 + pad], [j + 1 + pad, i - pad], [j - pad, i - pad]]
+        .map(([x, y]) => map.project([x * CELL, y * CELL]));
+      g.beginPath();
+      pts.forEach((p, k) => (k ? g.lineTo(p.x * RES, p.y * RES) : g.moveTo(p.x * RES, p.y * RES)));
+      g.closePath(); g.fill();
     };
     if ((i1 - i0) * (j1 - j0) < visited.size) {
       for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) if (visited.has(key(i, j))) cutCell(i, j);

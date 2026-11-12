@@ -14,6 +14,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto:wght@400;600&display=swap" rel="stylesheet">
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="crisp.js"></script>
 <script src="pixel-style.js"></script>
 <script src="trees.js"></script>
 <script src="kenney-styles.js"></script>
@@ -144,6 +145,38 @@
   .review img { width:22px; height:22px; border-radius:50%; vertical-align:middle; margin-right:6px; }
   .gmaps-attrib { font:400 12px Roboto, Arial, sans-serif; color:#5e5e5e; margin-top:10px; }
   body.dark .gmaps-attrib { color:#ffffff; }
+  .place-hero { width:100%; height:210px; object-fit:cover; display:block; border:4px double var(--frame); border-radius:4px; cursor:zoom-in; background:#0002; }
+  .place-thumbs { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-top:6px; }
+  .place-thumbs img { width:100%; height:84px; object-fit:cover; display:block; border:3px double var(--frame); border-radius:4px; cursor:zoom-in; background:#0002; }
+  .photo-credit { font:11px/1.4 Roboto, Arial, sans-serif; color:var(--muted); margin:4px 0 6px; }
+  .photo-credit a { color:inherit; }
+  .rv-more { margin-left:4px; }
+  /* Full-screen photo viewer */
+  .lightbox { position:fixed; inset:0; z-index:40; background:#000e; display:flex; flex-direction:column; align-items:center;
+              justify-content:center; gap:10px; padding:12px; touch-action:pan-y; }
+  .lightbox[hidden] { display:none; }
+  .lightbox img { max-width:100%; max-height:76vh; object-fit:contain; border:4px double #9aa3c7; border-radius:4px; background:#111; }
+  .lb-bar { display:flex; gap:8px; align-items:center; padding:8px 10px; font:12px/1.4 Roboto, Arial, sans-serif; max-width:100%; }
+  .lb-bar span { flex:1; min-width:0; }
+  .lb-bar a { color:inherit; }
+  /* Travel mode chooser */
+  .mode-menu { position:absolute; z-index:12; padding:6px; display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; width:230px; }
+  .mode-menu[hidden] { display:none; }
+  .mode-menu button { font-family:'Press Start 2P', monospace; font-size:9px; display:flex; flex-direction:column; align-items:center;
+                      gap:6px; padding:8px 6px; cursor:pointer; color:var(--ink); background:var(--paper); border:4px double var(--frame); border-radius:6px; }
+  .mode-menu button.on { background:var(--btn); color:#202020; }
+  .mode-menu .pic { height:46px; display:flex; align-items:flex-end; justify-content:center; }
+  .mode-menu .pic .avatar { transform:scale(.7); transform-origin:bottom center; }
+  /* Drive mode */
+  body.driving .hud, body.driving .legend, body.driving .dialog { display:none; }
+  .drive-banner { position:absolute; left:12px; right:12px; top:12px; z-index:7; padding:12px 14px; display:flex; gap:12px; align-items:center; }
+  .drive-banner .dist { font-size:15px; white-space:nowrap; }
+  .drive-banner .text { font:600 16px/1.35 Roboto, Arial, sans-serif; }
+  .drive-bar { position:absolute; left:12px; right:12px; bottom:calc(var(--google-bar) + 10px); z-index:7; padding:10px 12px;
+               display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:9px; }
+  .drive-bar .grow { flex:1; line-height:1.9; min-width:150px; }
+  .drive-bar .speed { font-size:14px; }
+  .drive-banner[hidden], .drive-bar[hidden] { display:none; }
   .player { width:36px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
   /* The pulse lives on an inner box: MapLibre positions the outer element with `transform`,
      so animating `transform` on the outer element would fight with it. */
@@ -199,6 +232,10 @@
     <div class="choices small" id="weatherModes"></div>
     <div class="section">SOUND</div>
     <div class="choices small" id="soundModes"></div>
+    <div class="section">PIXELS</div>
+    <div class="choices small" id="pixelModes"></div>
+    <div class="section">DRIVE MODE VOICE</div>
+    <div class="choices small" id="voiceModes"></div>
     <div class="section">MORE</div>
     <div class="choices small" id="moreActions"></div>
   </div>
@@ -222,6 +259,23 @@
   </div>
 </div>
 
+<div class="box mode-menu" id="modeMenu" hidden role="menu" aria-label="Choose travel mode"></div>
+<div class="box drive-banner" id="driveBanner" hidden aria-live="polite"><div class="dist" id="driveDist"></div><div class="text" id="driveText"></div></div>
+<div class="box drive-bar" id="driveBar" hidden>
+  <div class="grow"><span class="speed" id="driveSpeed">-- KM/H</span><br><span id="driveEta"></span></div>
+  <button class="mini" type="button" id="driveCenter">RECENTER</button>
+  <button class="mini" type="button" id="driveVoiceBtn">VOICE ON</button>
+  <button class="mini" type="button" id="driveExit">EXIT</button>
+</div>
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer">
+  <img id="lbImg" alt="">
+  <div class="box lb-bar">
+    <button class="mini" type="button" id="lbPrev" aria-label="Previous photo">&lt;</button>
+    <span id="lbInfo"></span>
+    <button class="mini" type="button" id="lbNext" aria-label="Next photo">&gt;</button>
+    <button class="mini" type="button" id="lbClose" aria-label="Close photo viewer">X</button>
+  </div>
+</div>
 <div class="box toast" id="toast" hidden role="status" aria-live="polite"></div>
 <div class="settings" id="placePanel" hidden>
   <div class="box panel" role="dialog" aria-modal="true" aria-label="Place details">
@@ -250,7 +304,7 @@ let gmap = null;   // the Google map, once Google has loaded
 // Starts empty; the chosen theme is loaded right after (Kenney themes need their tile sheets first).
 const pmap = new maplibregl.Map({
   container: 'pmap', style: { version: 8, sources: {}, layers: [] }, interactive: false,
-  center: [START.lng, START.lat], zoom: 16, pixelRatio: 0.5,
+  center: [START.lng, START.lat], zoom: 16, pixelRatio: Crisp.ratio(),   // SHARP = screen resolution, CHUNKY = half
   attributionControl: { compact: false }, fadeDuration: 0,
 });
 // Real-size trees in woods. Attached before the route layers so routes always draw above trees.
@@ -386,8 +440,9 @@ function addArtLayers() {
 
 // Every new style: add textures + art, then put the route back on top (keeps an active route across switches).
 pmap.on('style.load', () => {
-  themeImages.forEach((im) => { if (!pmap.hasImage(im.id)) pmap.addImage(im.id, im.data, { pixelRatio: im.pixelRatio }); });
-  artImages().forEach((im) => { if (im.data && !pmap.hasImage(im.id)) pmap.addImage(im.id, im.data, { pixelRatio: 0.5 }); });
+  // Crisp.add enlarges pixel art by whole numbers so it stays sharp at any screen resolution.
+  themeImages.forEach((im) => Crisp.add(pmap, im.id, im.data, 1 / im.pixelRatio));
+  artImages().forEach((im) => { if (im.data) Crisp.add(pmap, im.id, im.data, 2); });
   addArtLayers();
   if (pmap.getLayer('water-name') && !pmap.getSource('route')) {
     R.addLayers(pmap, 'water-name'); R.setRoute(pmap, routeFeats, routeStops); paintLegend();
@@ -395,16 +450,16 @@ pmap.on('style.load', () => {
 });
 pmap.on('styleimagemissing', (e) => {
   const im = themeImages.find((i) => i.id === e.id);
-  if (im && !pmap.hasImage(e.id)) pmap.addImage(im.id, im.data, { pixelRatio: im.pixelRatio });
+  if (im && !pmap.hasImage(e.id)) Crisp.add(pmap, im.id, im.data, 1 / im.pixelRatio);
 });
 darkQuery.addEventListener('change', () => { if (settings.dark === 'auto') applyMapTheme(); });
 
 // ---------- panels ----------
-function openPanel(id, render) { if (render) render(); $(id).hidden = false; }
+function openPanel(id, render) { if (render) render(); $(id).hidden = false; ensureGuard(); }
 document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => { $(b.dataset.close).hidden = true; }; });
 document.querySelectorAll('.settings').forEach((p) => { p.onclick = (e) => { if (e.target === p) p.hidden = true; }; });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { document.querySelectorAll('.settings').forEach((p) => { p.hidden = true; }); hideResults(); }
+  if (e.key === 'Escape') { closeLightbox(); $('modeMenu').hidden = true; document.querySelectorAll('.settings').forEach((p) => { p.hidden = true; }); hideResults(); }
 });
 document.addEventListener('click', (e) => { if (e.target.closest('button')) sfx('click'); }, true);
 
@@ -452,6 +507,13 @@ function renderSettings() {
   const soundOn = !!(window.Sfx && Sfx.enabled);
   fill('soundModes', [[true, 'ON'], [false, 'OFF']].map(([v, label]) =>
     choiceButton(label, soundOn === v, () => { if (window.Sfx) Sfx.enabled = v; renderSettings(); }, null, '', !window.Sfx)));
+
+  fill('pixelModes', [['sharp', 'SHARP', 'CRISP ON PHONES'], ['chunky', 'CHUNKY', 'RETRO HALF-RES']].map(([v, label, hint]) =>
+    choiceButton(label, Crisp.mode === v, () => {
+      Crisp.setMode(v); pmap.setPixelRatio(Crisp.ratio()); renderSavedMarkers(); applyMapTheme();
+    }, null, hint)));
+  fill('voiceModes', [['on', 'ON', 'SPOKEN TURNS'], ['off', 'OFF']].map(([v, label, hint]) =>
+    choiceButton(label, drive.voice === v, () => { setVoice(v); renderSettings(); }, null, hint)));
 
   const peekOn = $('pmap').classList.contains('peek');
   const more = [choiceButton(peekOn ? 'BACK TO GAME' : 'PEEK GOOGLE', peekOn, () => {
@@ -518,8 +580,9 @@ let savedMarkers = [];
 function iconCanvas(img, scale) {
   const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
   c.getContext('2d').putImageData(img, 0, 0);
-  c.style.cssText = `width:${img.width * scale}px;height:${img.height * scale}px;image-rendering:pixelated;filter:drop-shadow(2px 2px 0 #0005);display:block`;
-  return c;
+  const out = Crisp.canvas(c, scale);                 // drawn at screen resolution: sharp on phones
+  out.style.cssText += ';filter:drop-shadow(2px 2px 0 #0005);display:block';
+  return out;
 }
 const SAVED_COLORS = { home: '#3a78d8', work: '#8a5a2c', favorite: '#e8302c' };
 const savedIcon = (type, scale = 2) => {
@@ -585,6 +648,7 @@ function setDestination(pos, name, placeId) {
   $('infoBtn').hidden = !destPlaceId;
   msg(`Go to ${esc(destName)}?<br>Press GO! (${R.MODES[modeIdx].label})`);
   syncGoogleDest();
+  ensureGuard();
 }
 
 // ---------- your position, route and target on Google's own map (seen with PEEK GOOGLE) ----------
@@ -637,7 +701,7 @@ async function openPlaceCard(placeId) {
   if (!placeId) return;
   $('placeTitle').textContent = 'PLACE';
   $('placeBody').innerHTML = '<div class="empty">Loading photos and info...</div>';
-  $('placePanel').hidden = false;
+  $('placePanel').hidden = false; ensureGuard();
   try {
     placesLib = placesLib || await google.maps.importLibrary('places');
     let place = placeCache.get(placeId);
@@ -653,18 +717,18 @@ async function openPlaceCard(placeId) {
     $('placeBody').innerHTML = `<div class="empty">Couldn't load this place. ${esc(String((err && err.message) || '').slice(0, 100))}</div>`;
   }
 }
+let cardPhotos = [], cardShown = 4;
+const photoCredit = (ph) => {
+  const a = ph && (ph.authorAttributions || [])[0];
+  if (!a) return '';
+  return 'Photo: ' + (a.uri ? `<a href="${esc(a.uri)}" target="_blank" rel="noopener">${esc(a.displayName)}</a>` : esc(a.displayName));
+};
 function renderPlaceCard(p) {
   const name = p.displayName || destName || 'PLACE';
   $('placeTitle').textContent = name.toUpperCase().slice(0, 38);
-  const html = [];
-  const photos = (p.photos || []).slice(0, 4);          // each photo shown is billed, so at most 4
-  if (photos.length) {
-    html.push('<div class="place-photos">' + photos.map((ph) => {
-      const a = (ph.authorAttributions || [])[0];
-      const credit = a ? `Photo: ${a.uri ? `<a href="${esc(a.uri)}" target="_blank" rel="noopener">${esc(a.displayName)}</a>` : esc(a.displayName)}` : '';
-      return `<figure><img decoding="async" alt="Photo of ${esc(name)}" src="${esc(ph.getURI({ maxHeight: 280 }))}"><figcaption>${credit}</figcaption></figure>`;
-    }).join('') + '</div>');
-  }
+  cardPhotos = p.photos || [];                          // Google gives up to 10
+  cardShown = Math.min(4, cardPhotos.length);           // each photo shown is billed: start with 4
+  const html = ['<div id="photoArea"></div>'];
   const facts = [];
   if (p.rating) facts.push(`★ ${p.rating.toFixed(1)}${p.userRatingCount ? ` · ${p.userRatingCount.toLocaleString('en-IN')} RATINGS` : ''}`);
   const hours = p.regularOpeningHours && p.regularOpeningHours.weekdayDescriptions;
@@ -678,22 +742,81 @@ function renderPlaceCard(p) {
   if (p.googleMapsURI) links.push(`<a href="${esc(p.googleMapsURI)}" target="_blank" rel="noopener">OPEN IN GOOGLE MAPS</a>`);
   html.push(`<div class="place-links"><button type="button" class="mini" data-act="go">GO</button>`
     + `<button type="button" class="mini" data-act="save">SAVE</button>${links.join('')}</div>`);
-  const reviews = (p.reviews || []).slice(0, 3);
+  // Google gives apps at most 5 reviews per place: show 2, the rest on demand (already loaded, no extra cost).
+  const reviews = p.reviews || [];
   if (reviews.length) {
-    html.push('<div class="section">MOST RELEVANT REVIEWS (GOOGLE ORDER)</div>' + reviews.map((r) => {
+    html.push('<div class="section">MOST RELEVANT REVIEWS (GOOGLE ORDER)</div>');
+    html.push(reviews.map((r, k) => {
       const a = r.authorAttribution || {};
       const who = a.uri ? `<a href="${esc(a.uri)}" target="_blank" rel="noopener">${esc(a.displayName || 'Google user')}</a>` : esc(a.displayName || 'Google user');
-      const text = String(r.text || '');
-      return `<div class="review">${a.photoURI ? `<img src="${esc(a.photoURI)}" alt="">` : ''}<b>${who}</b> · ${'★'.repeat(Math.round(r.rating || 0))}`
-        + ` <small>${esc(r.relativePublishTimeDescription || '')}</small><br>${esc(text.length > 300 ? text.slice(0, 300) + '…' : text)}</div>`;
+      const text = String(r.text || ''), long = text.length > 240;
+      return `<div class="review"${k >= 2 ? ' hidden' : ''}>${a.photoURI ? `<img src="${esc(a.photoURI)}" alt="">` : ''}<b>${who}</b> · ${'★'.repeat(Math.round(r.rating || 0))}`
+        + ` <small>${esc(r.relativePublishTimeDescription || '')}</small><br><span class="rv-text">${esc(long ? text.slice(0, 240) + '…' : text)}</span>`
+        + (long ? `<button type="button" class="mini rv-more" data-full="${esc(text)}">READ MORE</button>` : '') + '</div>';
     }).join(''));
+    const extra = [];
+    if (reviews.length > 2) extra.push(`<button type="button" class="mini" id="moreReviews">MORE REVIEWS (+${reviews.length - 2})</button>`);
+    if (p.googleMapsURI) extra.push(`<a href="${esc(p.googleMapsURI)}" target="_blank" rel="noopener">ALL REVIEWS ON GOOGLE MAPS</a>`);
+    if (extra.length) html.push(`<div class="place-links">${extra.join('')}</div>`);
   }
-  if (!photos.length && !facts.length && !reviews.length && !p.editorialSummary) html.push('<div class="empty">Google has no photos or details for this spot.</div>');
+  if (!cardPhotos.length && !facts.length && !reviews.length && !p.editorialSummary) html.push('<div class="empty">Google has no photos or details for this spot.</div>');
   html.push('<div class="gmaps-attrib">Google Maps</div>');
-  $('placeBody').innerHTML = html.join('');
-  $('placeBody').querySelector('[data-act="go"]').onclick = () => { $('placePanel').hidden = true; findRoute(); };
-  $('placeBody').querySelector('[data-act="save"]').onclick = () => saveDest('favorite');
+  const body = $('placeBody');
+  body.innerHTML = html.join('');
+  renderPhotos();
+  body.querySelector('[data-act="go"]').onclick = () => { $('placePanel').hidden = true; findRoute(); };
+  body.querySelector('[data-act="save"]').onclick = () => saveDest('favorite');
+  const more = $('moreReviews');
+  if (more) more.onclick = () => { body.querySelectorAll('.review[hidden]').forEach((r) => { r.hidden = false; }); more.remove(); };
+  body.querySelectorAll('.rv-more').forEach((b) => {
+    b.onclick = () => { b.parentElement.querySelector('.rv-text').textContent = b.dataset.full; b.remove(); };
+  });
 }
+// Big first photo + thumbnails; tap any photo for full screen. MORE PHOTOS loads the rest.
+function renderPhotos() {
+  const area = $('photoArea'); if (!area) return;
+  if (!cardPhotos.length) { area.innerHTML = ''; return; }
+  const name = esc($('placeTitle').textContent), hero = cardPhotos[0];
+  let h = `<img class="place-hero" data-i="0" alt="Photo of ${name}" src="${esc(hero.getURI({ maxWidth: 800, maxHeight: 420 }))}">`
+        + `<div class="photo-credit">${photoCredit(hero)}</div>`;
+  const thumbs = cardPhotos.slice(1, cardShown);
+  if (thumbs.length) {
+    h += '<div class="place-thumbs">' + thumbs.map((ph, k) =>
+      `<img data-i="${k + 1}" alt="Photo ${k + 2} of ${name}" src="${esc(ph.getURI({ maxWidth: 300, maxHeight: 200 }))}">`).join('') + '</div>';
+  }
+  if (cardPhotos.length > cardShown) h += `<div class="place-links"><button type="button" class="mini" id="morePhotos">MORE PHOTOS (+${cardPhotos.length - cardShown})</button></div>`;
+  area.innerHTML = h;
+  area.querySelectorAll('img[data-i]').forEach((img) => { img.onclick = () => openLightbox(+img.dataset.i); });
+  const mp = $('morePhotos');
+  if (mp) mp.onclick = () => { cardShown = cardPhotos.length; renderPhotos(); };
+}
+let lbIndex = 0;
+function openLightbox(i) { lbIndex = i; showLightbox(); $('lightbox').hidden = false; ensureGuard(); }
+function closeLightbox() { $('lightbox').hidden = true; $('lbImg').removeAttribute('src'); }
+function showLightbox() {
+  const ph = cardPhotos[lbIndex]; if (!ph) return;
+  const w = Math.min(1600, Math.round(window.innerWidth * (window.devicePixelRatio || 1)));
+  $('lbImg').src = ph.getURI({ maxWidth: w });
+  $('lbImg').alt = `Photo ${lbIndex + 1} of ${$('placeTitle').textContent}`;
+  $('lbInfo').innerHTML = `${lbIndex + 1}/${cardPhotos.length} · ${photoCredit(ph) || 'Google Maps'}`;
+  $('lbPrev').disabled = lbIndex <= 0; $('lbNext').disabled = lbIndex >= cardPhotos.length - 1;
+}
+$('lbPrev').onclick = () => { if (lbIndex > 0) { lbIndex--; showLightbox(); } };
+$('lbNext').onclick = () => { if (lbIndex < cardPhotos.length - 1) { lbIndex++; showLightbox(); } };
+$('lbClose').onclick = closeLightbox;
+$('lightbox').onclick = (e) => { if (e.target === $('lightbox')) closeLightbox(); };
+let lbTouchX = null;
+$('lightbox').addEventListener('touchstart', (e) => { lbTouchX = e.touches[0].clientX; }, { passive: true });
+$('lightbox').addEventListener('touchend', (e) => {
+  if (lbTouchX === null) return;
+  const dx = e.changedTouches[0].clientX - lbTouchX; lbTouchX = null;
+  if (dx > 50) $('lbPrev').click(); else if (dx < -50) $('lbNext').click();
+});
+document.addEventListener('keydown', (e) => {
+  if ($('lightbox').hidden) return;
+  if (e.key === 'ArrowLeft') $('lbPrev').click();
+  if (e.key === 'ArrowRight') $('lbNext').click();
+});
 
 // ---------- search (Google Places) ----------
 let placesLib = null, sessionToken = null, searchTimer = 0, searchSeq = 0;
@@ -814,7 +937,8 @@ async function findRoute(opts = {}) {
   dialog.classList.toggle('clickable', steps.length > 0);
   goBtn.disabled = false; startBtn.disabled = false; previewBtn.disabled = false;
   sfx('found');
-  if (opts.keepNav) { nav.stepIdx = 0; showNavStep(); return; }
+  ensureGuard();
+  if (opts.keepNav) { nav.stepIdx = 0; if (drive.active) prepareDriveRoute(); showNavStep(); return; }
   showStep();
   const b = new google.maps.LatLngBounds();
   coords.forEach(([lng, lat]) => b.extend({ lat, lng }));
@@ -822,12 +946,38 @@ async function findRoute(opts = {}) {
 }
 goBtn.onclick = () => findRoute();
 
+// Pick CAR / BIKE / WALK / METRO from a small menu. Choosing only selects the mode; GO fetches the route.
+function renderModeMenu() {
+  $('modeMenu').replaceChildren(...R.MODES.map((m, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = i === modeIdx ? 'on' : '';
+    b.setAttribute('role', 'menuitemradio'); b.setAttribute('aria-checked', i === modeIdx);
+    const pic = document.createElement('span'); pic.className = 'pic';
+    pic.appendChild(Avatars.make(settings.map, m.id, packWalker));
+    b.append(pic, document.createTextNode(m.label));
+    b.onclick = () => chooseMode(i);
+    return b;
+  }));
+}
 $('mode').onclick = (e) => {
-  modeIdx = (modeIdx + 1) % R.MODES.length;
-  e.currentTarget.textContent = R.MODES[modeIdx].label;
-  refreshAvatar();
-  if (route) findRoute({ keepNav: nav.active });
+  if (nav.active) { toast('STOP NAVIGATION<br>TO CHANGE MODE'); return; }
+  const menu = $('modeMenu');
+  if (!menu.hidden) { menu.hidden = true; return; }
+  renderModeMenu();
+  const r = e.currentTarget.getBoundingClientRect();
+  menu.style.left = Math.max(12, Math.min(r.left, innerWidth - 242)) + 'px';
+  menu.style.top = (r.bottom + 6) + 'px';
+  menu.hidden = false; ensureGuard();
 };
+function chooseMode(i) {
+  $('modeMenu').hidden = true;
+  if (i === modeIdx) return;
+  modeIdx = i;
+  const m = R.MODES[i];
+  $('mode').textContent = m.label; refreshAvatar();
+  msg(dest ? `${m.label} selected.<br>Press GO! for a ${m.label} route.` : `${m.label} selected.<br>Search, or tap a spot, then press GO!`);
+}
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#modeMenu, #mode')) $('modeMenu').hidden = true; });
 
 // ---------- route preview run ----------
 let previewing = false;
@@ -876,8 +1026,10 @@ function startNav() {
   startBtn.textContent = 'STOP'; startBtn.classList.add('on');
   Progress.tripStarted();
   showNavStep(); updateWatch();
+  if (isRoadMode(routeMode)) enterDrive();     // CAR / BIKE: full driving view
 }
 function stopNav(text) {
+  if (drive.active) exitDrive();
   nav.active = false; startBtn.textContent = 'START'; startBtn.classList.remove('on');
   updateWatch(); if (text) msg(text);
 }
@@ -889,9 +1041,11 @@ function onFix(p) {
   const acc = p.coords.accuracy || 999, t = p.timestamp || Date.now();
   movePlayer(pos.lng, pos.lat);
   explore(pos);
+  // Direction of travel: the GPS course when moving, else the bearing from the last good fix.
+  let course = p.coords.heading != null && !isNaN(p.coords.heading) && (p.coords.speed || 0) > 1 ? p.coords.heading : null;
   if (lastFix && acc < 50) {
     const d = Geo.dist(lastFix.pos, pos), dt = Math.max(1, (t - lastFix.t) / 1000);
-    if (d >= 3) faceBearing(Geo.bearing(lastFix.pos, pos));
+    if (d >= 3) { const b = Geo.bearing(lastFix.pos, pos); faceBearing(b); if (course === null) course = b; }
     if (d >= 2 && d < 300) {            // ignore GPS jitter and jumps
       const speed = p.coords.speed != null && p.coords.speed >= 0 ? p.coords.speed : d / dt;
       const mode = nav.active ? routeMode : speed < 2.5 ? 'WALK' : speed < 9 ? 'TWO_WHEELER' : 'DRIVE';
@@ -900,7 +1054,7 @@ function onFix(p) {
     }
   }
   if (acc < 50) lastFix = { pos, t };
-  if (nav.active) navUpdate(pos);
+  if (nav.active) navUpdate(pos, p, course);
 }
 
 // Parks, lakes and landmarks you're standing at (counts toward badges).
@@ -918,10 +1072,11 @@ function explore(pos) {
   });
 }
 
-function navUpdate(pos) {
-  if (nav.follow && gmap) gmap.panTo(pos);
+function navUpdate(pos, p, course) {
+  if (drive.active) { if (course != null) drive.heading = course; driveCamera(pos, drive.heading); }
+  else if (nav.follow && gmap) gmap.panTo(pos);
   if (dest && Geo.dist(pos, dest) < 30) {
-    sfx('arrive'); Progress.tripFinished(routeMode);
+    sfx('arrive'); Progress.tripFinished(routeMode); speak(`You have arrived at ${destName}`);
     stopNav(`You arrived at ${esc(destName)}!<br>+25 XP. Well played!`);
     return;
   }
@@ -929,6 +1084,7 @@ function navUpdate(pos) {
   while (s && s.end && Geo.dist(pos, s.end) < 25 && nav.stepIdx < steps.length - 1) {
     nav.stepIdx++; s = steps[nav.stepIdx]; sfx('step'); showNavStep();
   }
+  if (drive.active) updateDriveUI(pos, p);
   // Off route for 3 fixes in a row: find a new way (at most every 30 s, to limit paid requests).
   nav.offCount = Geo.toLine(pos, routeCoords).dist > 60 ? nav.offCount + 1 : 0;
   if (nav.offCount >= 3 && Date.now() - nav.lastReroute > 30000) {
@@ -937,6 +1093,128 @@ function navUpdate(pos) {
     findRoute({ keepNav: true });
   }
 }
+
+// ---------- drive mode (CAR / BIKE navigation) ----------
+// Zoomed in, map turned so your direction points up, big next-turn banner, speed, ETA, spoken turns,
+// and the screen kept awake. Spoken turns use the phone's own voice (free, works offline).
+const drive = { active: false, voice: store.get('mapsplus.voice') || 'on', wake: null, heading: 0,
+                stepEndAlong: [], total: 0, told: { far: -1, near: -1 }, tween: 0 };
+const isRoadMode = (m) => m === 'DRIVE' || m === 'TWO_WHEELER';
+const plain = (t) => String(t || '').replace(/\s*\n\s*/g, '. ');
+function setVoice(v) {
+  drive.voice = v; store.set('mapsplus.voice', v);
+  $('driveVoiceBtn').textContent = v === 'on' ? 'VOICE ON' : 'VOICE OFF';
+  if (v !== 'on') { try { speechSynthesis.cancel(); } catch (_) {} }
+}
+function speak(text) {
+  if (drive.voice !== 'on' || !('speechSynthesis' in window)) return;
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'en-IN'; speechSynthesis.speak(u); } catch (_) {}
+}
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator && !drive.wake) {
+      drive.wake = await navigator.wakeLock.request('screen');
+      drive.wake.addEventListener('release', () => { drive.wake = null; });
+    }
+    if (!on && drive.wake) { await drive.wake.release(); drive.wake = null; }
+  } catch (_) { /* not supported or not allowed: the screen may dim as usual */ }
+}
+document.addEventListener('visibilitychange', () => { if (drive.active && document.visibilityState === 'visible') keepAwake(true); });
+function prepareDriveRoute() {
+  drive.stepEndAlong = steps.map((s) => (s.end ? Geo.toLine(s.end, routeCoords).along : 0));
+  drive.total = Geo.length(routeCoords); drive.told = { far: -1, near: -1 };
+}
+function enterDrive() {
+  drive.active = true; prepareDriveRoute();
+  document.body.classList.add('driving');
+  $('driveBanner').hidden = false; $('driveBar').hidden = false;
+  setVoice(drive.voice); keepAwake(true); ensureGuard();
+  if (gmap) gmap.moveCamera({ center: here(), zoom: 18.3 });
+  const first = updateDriveUI(here(), null, true);       // silent: we say it all in one sentence below
+  if (steps[0]) speak(plain(steps[0].text) + (first ? `. Then, ${first}` : ''));
+}
+function exitDrive() {
+  if (!drive.active) return;
+  drive.active = false; cancelAnimationFrame(drive.tween);
+  document.body.classList.remove('driving');
+  $('driveBanner').hidden = true; $('driveBar').hidden = true;
+  keepAwake(false); try { speechSynthesis.cancel(); } catch (_) {}
+  if (gmap) gmap.moveCamera({ heading: 0, zoom: Math.min(gmap.getZoom(), 17) });
+}
+function turnIcon(t) {
+  t = String(t || '').toLowerCase();
+  return /u-?turn/.test(t) ? '↶' : /roundabout/.test(t) ? '⟳' : /left/.test(t) ? '◀' : /right/.test(t) ? '▶' : '▲';
+}
+const lower1 = (t) => t.charAt(0).toLowerCase() + t.slice(1);
+// Returns the "in N metres ..." phrase if it was due now (so enterDrive can fold it into its first sentence).
+function updateDriveUI(pos, p, silent) {
+  const along = Geo.toLine(pos, routeCoords).along, i = nav.stepIdx, next = steps[i + 1];
+  const toTurn = Math.max(0, (drive.stepEndAlong[i] || drive.total) - along);
+  const left = Math.max(0, drive.total - along);
+  const instr = next ? next.text : `Arrive at ${destName}`;
+  $('driveDist').textContent = `${turnIcon(instr)} ${fmtKm(toTurn)}`;
+  $('driveText').textContent = plain(instr);
+  const pace = route && route.distanceMeters ? route.distanceMeters / Math.max(1, secs(route.duration)) : 8;   // m/s
+  const secsLeft = left / pace, eta = new Date(Date.now() + secsLeft * 1000);
+  $('driveEta').textContent = `${Math.max(1, Math.round(secsLeft / 60))} MIN · ${fmtKm(left)} · ARRIVE `
+    + eta.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }).toUpperCase();
+  const sp = p && p.coords && p.coords.speed != null && p.coords.speed >= 0 ? Math.round(p.coords.speed * 3.6) : null;
+  $('driveSpeed').textContent = sp == null ? '-- KM/H' : `${sp} KM/H`;
+  // Speak once ~200-300 m before a turn, and again just before it. (The last stretch says "you'll arrive";
+  // the arrival itself is announced when you get there.)
+  let due = null;
+  if (toTurn < 300 && toTurn > 80 && drive.told.far !== i) {
+    drive.told.far = i;
+    const m = Math.round(toTurn / 50) * 50;
+    due = next ? `in ${m} metres, ${lower1(plain(instr))}` : `in ${m} metres, you'll arrive at ${destName}`;
+    if (!silent) speak(due.charAt(0).toUpperCase() + due.slice(1));
+  }
+  if (next && toTurn <= 60 && drive.told.near !== i) { drive.told.near = i; if (!silent) speak(plain(instr)); }
+  return due;
+}
+// Glide the camera to you over ~1 s (GPS updates about once a second), turning the short way round.
+function driveCamera(pos, heading) {
+  if (!gmap || !nav.follow) return;
+  cancelAnimationFrame(drive.tween);
+  const c0 = gmap.getCenter(), h0 = gmap.getHeading() || 0, t0 = performance.now();
+  const dh = ((heading - h0 + 540) % 360) - 180, from = { lat: c0.lat(), lng: c0.lng() };
+  (function step(now) {
+    const t = Math.min(1, (now - t0) / 900);
+    gmap.moveCamera({ center: { lat: from.lat + (pos.lat - from.lat) * t, lng: from.lng + (pos.lng - from.lng) * t },
+                      heading: (h0 + dh * t + 360) % 360 });
+    if (t < 1) drive.tween = requestAnimationFrame(step);
+  })(t0);
+}
+$('driveExit').onclick = () => stopNav('Navigation stopped.<br>Press START to resume.');
+$('driveCenter').onclick = () => { nav.follow = true; driveCamera(here(), drive.heading); };
+$('driveVoiceBtn').onclick = () => setVoice(drive.voice === 'on' ? 'off' : 'on');
+
+// ---------- back gesture / back button ----------
+// Instead of leaving the app, BACK closes what's on top: photo viewer > menus/panels > navigation > route.
+function clearRoute() {
+  if (nav.active) stopNav();
+  route = null; routeFeats = []; routeStops = []; routeCoords = []; steps = []; stepIdx = -1; summary = '';
+  dest = null; destName = ''; destPlaceId = null;
+  R.setRoute(pmap, []); target.remove(); flag.remove();
+  $('legend').hidden = true; $('infoBtn').hidden = true; dialog.classList.remove('clickable');
+  goBtn.disabled = true; startBtn.disabled = true; previewBtn.disabled = true;
+  drawGoogleRoute(); syncGoogleDest();
+  msg('Route cleared.<br>Search, or tap a spot, then press GO!');
+}
+const hasCancelable = () => !$('lightbox').hidden || !$('modeMenu').hidden || drive.active || nav.active || !!dest
+  || [...document.querySelectorAll('.settings')].some((p) => !p.hidden);
+function ensureGuard() {
+  try { if (!(history.state && history.state.mapsplus)) history.pushState({ mapsplus: 1 }, ''); } catch (_) {}
+}
+window.addEventListener('popstate', () => {
+  const panels = [...document.querySelectorAll('.settings')].filter((p) => !p.hidden);
+  if (!$('lightbox').hidden) closeLightbox();
+  else if (!$('modeMenu').hidden) $('modeMenu').hidden = true;
+  else if (panels.length) panels.forEach((p) => { p.hidden = true; });
+  else if (nav.active) stopNav('Navigation stopped.<br>Back again to clear the route.');
+  else if (dest) clearRoute();
+  if (hasCancelable()) ensureGuard();
+});
 
 // ---------- weather ----------
 let rain = null, toldWeather = false;
@@ -978,18 +1256,18 @@ window.initMap = () => {
   // so both canvases change in the same browser frame.
   const gEl = $('gmap');
   let last = '';
-  function apply(lng, lat, zoom) {
-    const key = lng.toFixed(9) + ',' + lat.toFixed(9) + ',' + zoom.toFixed(6);
+  function apply(lng, lat, zoom, bearing = 0) {
+    const key = lng.toFixed(9) + ',' + lat.toFixed(9) + ',' + zoom.toFixed(6) + ',' + bearing.toFixed(4);
     if (key === last) return;
     last = key;
-    pmap.jumpTo({ center: [lng, lat], zoom });
+    pmap.jumpTo({ center: [lng, lat], zoom, bearing });
     try { pmap.redraw(); } catch (_) { /* style still loading; MapLibre paints on its own */ }
   }
   // Simple path: read Google's camera. Google zoom uses 256px tiles and MapLibre uses 512px tiles,
   // so MapLibre zoom = Google zoom - 1.
   function syncFromCamera() {
     const c = gmap.getCenter(), z = gmap.getZoom();
-    if (c && z != null) apply(c.lng(), c.lat(), z - 1);
+    if (c && z != null) apply(c.lng(), c.lat(), z - 1, gmap.getHeading() || 0);
   }
   // Exact path (vector Google maps): inside Google's own draw call, project two points with the
   // exact matrix Google is drawing this frame, and solve for the matching MapLibre camera.
@@ -1005,11 +1283,14 @@ window.initMap = () => {
     const sA = screenOf(transformer, a.lat, a.lng, W, H), sB = screenOf(transformer, b.lat, b.lng, W, H);
     const mA = maplibregl.MercatorCoordinate.fromLngLat([a.lng, a.lat]);
     const mB = maplibregl.MercatorCoordinate.fromLngLat([b.lng, b.lat]);
-    const worldPx = Math.hypot(sB.x - sA.x, sB.y - sA.y) / Math.hypot(mB.x - mA.x, mB.y - mA.y);
+    const dsx = sB.x - sA.x, dsy = sB.y - sA.y, dmx = mB.x - mA.x, dmy = mB.y - mA.y;
+    const worldPx = Math.hypot(dsx, dsy) / Math.hypot(dmx, dmy);
     if (!isFinite(worldPx) || worldPx <= 0) return syncFromCamera();
-    const center = new maplibregl.MercatorCoordinate(
-      mA.x - (sA.x - W / 2) / worldPx, mA.y - (sA.y - H / 2) / worldPx).toLngLat();
-    apply(center.lng, center.lat, Math.log2(worldPx / 512));
+    // How far the map is turned on screen (drive mode rotates it so your direction points up).
+    const theta = Math.atan2(dsy, dsx) - Math.atan2(dmy, dmx);
+    const ox = (sA.x - W / 2) / worldPx, oy = (sA.y - H / 2) / worldPx, cs = Math.cos(-theta), sn = Math.sin(-theta);
+    const center = new maplibregl.MercatorCoordinate(mA.x - (ox * cs - oy * sn), mA.y - (ox * sn + oy * cs)).toLngLat();
+    apply(center.lng, center.lat, Math.log2(worldPx / 512), ((-theta * 180 / Math.PI) % 360 + 360) % 360);
   }
   let exact = false;
   if (google.maps.WebGLOverlayView) {
