@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maps+ Google Skin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#202020; --paper:#f8f8f0; --frame:#303040; }
+  html, body { margin:0; height:100%; background:#14161c; }
+  #map { position:absolute; inset:0; }
+  .box { font-family:'Press Start 2P', monospace; color:var(--ink); background:var(--paper);
+         border:5px double var(--frame); border-radius:6px; box-shadow:3px 3px 0 #0006; }
+  .hud { position:absolute; top:12px; left:12px; right:12px; z-index:5; display:flex; gap:8px; flex-wrap:wrap; }
+  .hud .title { padding:9px 12px; font-size:11px; }
+  .hud input { flex:1; min-width:160px; font:inherit; font-family:'Press Start 2P', monospace; font-size:10px;
+               padding:10px 12px; background:var(--paper); border:5px double var(--frame); border-radius:6px; }
+  .hud button { font-family:'Press Start 2P', monospace; font-size:10px; padding:9px 12px; cursor:pointer;
+                background:#ffcc33; color:var(--ink); border:5px double var(--frame); border-radius:6px; }
+  .hud button.on { background:#7ad46e; }
+  .dialog { position:absolute; left:12px; right:12px; bottom:34px; z-index:5; padding:12px 16px;
+            font-size:11px; line-height:1.9; max-width:640px; }
+  .dialog .arrow { float:right; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .player { position:absolute; width:36px; height:42px; image-rendering:pixelated;
+            transform:translate(-50%,-100%); filter:drop-shadow(2px 3px 0 #0005); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="hud">
+  <div class="box title">MAPS+</div>
+  <input id="search" placeholder="SEARCH A PLACE..." aria-label="Search a place">
+  <button id="traffic" type="button">TRAFFIC</button>
+</div>
+<div class="box dialog">You are near MG ROAD.<br>Where do you want to go? <span class="arrow">▼</span></div>
+
+<script>
+// Paste your own key here once you create one in Google Cloud Console.
+// Left empty, Google loads the map in "for development purposes only" mode, which is fine for previewing the style.
+const GOOGLE_MAPS_API_KEY = '';
+
+const START = { lat: 12.9756, lng: 77.6066 };   // MG Road, Bengaluru
+
+// Game palette expressed with Google's own styling options (colors, weights, visibility).
+const GAME_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#e6dcb0' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#ffffff' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#202030' }, { weight: 4 }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#8fd46e' }] },
+  { featureType: 'landscape.man_made', elementType: 'geometry.fill', stylers: [{ color: '#d8644a' }] },
+  { featureType: 'landscape.man_made', elementType: 'geometry.stroke', stylers: [{ color: '#2a2030' }, { weight: 1.5 }] },
+  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#e6dcb0' }] },
+  { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#8fd46e' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.stroke', stylers: [{ color: '#225a24' }, { weight: 4 }] },
+  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#f2dc9a' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#7a5a36' }, { weight: 2 }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#3a2a18' }] },
+  { featureType: 'road', elementType: 'labels.text.stroke', stylers: [{ color: '#f2dc9a' }, { weight: 4 }] },
+  { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#f7c860' }] },
+  { featureType: 'road.arterial', elementType: 'geometry.fill', stylers: [{ color: '#f7d878' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'simplified' }] },
+  { featureType: 'transit.line', elementType: 'geometry', stylers: [{ color: '#707080' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#58a8f0' }] },
+  { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#1d3c66' }, { weight: 4 }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#7a5a36' }] },
+];
+
+// Original pixel-art player sprite (12x14), drawn on a canvas and scaled up with crisp pixels.
+function makePlayer() {
+  const rows = ['....KKKK....','...KRRRRK...','..KRRRRRRK..','..KKKKKKKK..','..KSSKKSSK..','..KSSSSSSK..',
+                '...KSSSSK...','..KBBBBBBK..','.KSKBBBBKSK.','.KSKBBBBKSK.','..KBBBBBBK..','..KNNKKNNK..',
+                '..KNNKKNNK..','..KKK..KKK..'];
+  const pal = { K:'#202020', R:'#e8502c', S:'#f4c89c', B:'#3a78d8', N:'#40406a' };
+  const c = document.createElement('canvas'); c.width = 12; c.height = 14; c.className = 'player';
+  const g = c.getContext('2d');
+  rows.forEach((r, y) => [...r].forEach((ch, x) => { if (pal[ch]) { g.fillStyle = pal[ch]; g.fillRect(x, y, 1, 1); } }));
+  return c;
+}
+
+window.initMap = () => {
+  const map = new google.maps.Map(document.getElementById('map'), {
+    center: START, zoom: 17, styles: GAME_STYLE,
+    disableDefaultUI: true, zoomControl: true, clickableIcons: false,
+  });
+
+  // HTML overlay so the sprite stays pixel-crisp (a custom marker on Google's map is allowed).
+  class Sprite extends google.maps.OverlayView {
+    constructor(pos) { super(); this.pos = pos; this.el = makePlayer(); }
+    onAdd() { this.getPanes().overlayMouseTarget.appendChild(this.el); }
+    draw() {
+      const p = this.getProjection().fromLatLngToDivPixel(this.pos);
+      this.el.style.left = p.x + 'px'; this.el.style.top = p.y + 'px';
+    }
+    onRemove() { this.el.remove(); }
+  }
+  new Sprite(new google.maps.LatLng(START)).setMap(map);
+
+  const traffic = new google.maps.TrafficLayer();
+  const btn = document.getElementById('traffic');
+  btn.onclick = () => {
+    const on = !traffic.getMap();
+    traffic.setMap(on ? map : null);
+    btn.classList.toggle('on', on);
+  };
+};
+
+const s = document.createElement('script');
+s.src = 'https://maps.googleapis.com/maps/api/js?callback=initMap&v=weekly'
+      + (GOOGLE_MAPS_API_KEY ? '&key=' + encodeURIComponent(GOOGLE_MAPS_API_KEY) : '');
+s.async = true;
+document.head.appendChild(s);
+</script>
+</body>
+</html>

@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maps+</title>
+<!-- Installable app: home-screen icon + offline support (see sw.js for what is cached; Google is never cached). -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#22263a">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+<script src="pwa.js"></script>
+<script>if (window.PWA) PWA.register();</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="pixel-style.js"></script>
+<script src="trees.js"></script>
+<script src="kenney-styles.js"></script>
+<script src="themes.js"></script>
+<script src="avatars.js"></script>
+<script src="routing.js"></script>
+<script src="geo-utils.js"></script>
+<script src="progress.js"></script>
+<script src="fog.js"></script>
+<!-- Optional add-ons: the app works (with less flair) if any of these is missing. -->
+<script src="pixel-art.js" onerror="console.warn('pixel-art.js missing')"></script>
+<script src="sky.js" onerror="console.warn('sky.js missing')"></script>
+<script src="sfx.js" onerror="console.warn('sfx.js missing')"></script>
+<style>
+  :root { --ink:#202020; --paper:#f8f8f0; --frame:#303040; --muted:#6a6458; --btn:#ffcc33; --btn-on:#7ad46e;
+          --google-bar:28px; }
+  /* Dark mode for the game UI (the map itself switches to each theme's night version). */
+  body.dark { --ink:#e9ecff; --paper:#22263a; --frame:#9aa3c7; --muted:#a3a9c8; --btn:#d9a62a; --btn-on:#4fae5a; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#14161c; }
+
+  /* Layer 1: real Google map. Receives every click, drag and pinch. */
+  #gmap { position:absolute; inset:0; z-index:0; }   /* own stacking context so Google's popups stay underneath */
+
+  /* Layer 2: pixel game map drawn on top. Ignores the mouse, so input falls through to Google.
+     Exactly the same box as the Google map (so no offset math), with the bottom strip clipped away
+     so Google's logo and attribution stay visible. */
+  #pmap { position:absolute; inset:0; clip-path:inset(0 0 var(--google-bar) 0);
+          z-index:1; pointer-events:none; transition:opacity .25s; }
+  #pmap .maplibregl-ctrl-bottom-right { bottom:var(--google-bar); }
+  #pmap.peek { opacity:0; }
+  #pmap.traffic-view { opacity:.35; }
+  #pmap .maplibregl-canvas { image-rendering:pixelated; image-rendering:crisp-edges; }
+
+  /* Layer 3: game UI */
+  .box { font-family:'Press Start 2P', monospace; color:var(--ink); background:var(--paper);
+         border:5px double var(--frame); border-radius:6px; box-shadow:3px 3px 0 #0006; }
+  .hud { position:absolute; top:12px; left:12px; right:12px; z-index:6; display:flex; gap:8px; flex-wrap:wrap; }
+  .hud button { font-family:'Press Start 2P', monospace; font-size:10px; padding:9px 12px; cursor:pointer;
+                background:var(--btn); color:#202020; border:5px double var(--frame); border-radius:6px; }
+  .hud button.on { background:var(--btn-on); }
+  .hud button:disabled { background:#c8c4b4; color:#7a7668; cursor:default; }
+  #go:not(:disabled) { background:#ff6a4a; color:#fff; text-shadow:1px 1px 0 #202020; }
+  #start.on { background:#ff6a4a; color:#fff; text-shadow:1px 1px 0 #202020; }
+  /* PEEK GOOGLE: blue (not the yellow game buttons) with a pixel eye, so it reads as "look at the real map". */
+  .hud #peek { background:#3b78e7; color:#fff; text-shadow:1px 1px 0 #102040; padding-left:34px; position:relative; }
+  .hud #peek::before { content:''; position:absolute; left:9px; top:50%; width:18px; height:12px; margin-top:-6px;
+    image-rendering:pixelated; background:no-repeat center/18px 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 6' shape-rendering='crispEdges'%3E%3Cpath fill='%23202020' d='M2 0h5v1H2zM1 1h1v1H1zM7 1h1v1H7zM0 2h1v2H0zM8 2h1v2H8zM1 4h1v1H1zM7 4h1v1H7zM2 5h5v1H2z'/%3E%3Cpath fill='%23fff' d='M2 1h5v4H2zM1 2h7v2H1z'/%3E%3Cpath fill='%23202020' d='M4 2h2v2H4z'/%3E%3C/svg%3E"); }
+  .hud #peek.on { background:var(--btn-on); color:#202020; text-shadow:none; }
+  .hud .title { background:var(--paper); color:var(--ink); padding:6px 10px; font-size:11px; text-align:left; line-height:1.3; }
+  .xpbar { display:block; width:90px; height:6px; margin-top:4px; border:2px solid var(--frame); background:#0002; }
+  .xpbar i { display:block; height:100%; width:0; background:#4fc3ff; transition:width .4s steps(6); }
+  #lvl { font-size:8px; color:var(--muted); margin-left:4px; }
+
+  .search { position:relative; flex:1 1 200px; display:flex; min-width:0; }
+  .search input { flex:1; min-width:0; font-family:'Press Start 2P', monospace; font-size:10px; padding:10px;
+                  color:var(--ink); background:var(--paper); border:5px double var(--frame); border-radius:6px; }
+  .search input::placeholder { color:var(--muted); }
+  .results { position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:9; padding:4px; max-height:50vh; overflow:auto; }
+  .results button { display:block; width:100%; text-align:left; cursor:pointer; background:transparent; color:var(--ink);
+                    border:0; border-bottom:2px dashed var(--frame); padding:8px 6px; font:9px/1.6 'Press Start 2P', monospace; }
+  .results button:last-child { border-bottom:0; }
+  .results small { display:block; font-size:7px; color:var(--muted); }
+  .results .note { padding:8px 6px; font-size:8px; line-height:1.6; }
+
+  .legend { position:absolute; right:12px; top:var(--legend-top, 170px); z-index:5; padding:8px 10px; font-size:8px; line-height:2.2; }
+  .legend i { display:inline-block; width:22px; height:8px; margin-right:6px; vertical-align:middle; border:2px solid #202020; }
+  .legend .theme-name { margin-top:2px; color:var(--muted); }
+
+  .dialog { position:absolute; left:12px; right:12px; bottom:calc(var(--google-bar) + 10px); z-index:5;
+            padding:12px 16px; font-size:11px; line-height:1.9; max-width:640px; }
+  .dialog.clickable { cursor:pointer; }
+  .dialog .arrow { float:right; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .toast { position:absolute; left:50%; top:45%; transform:translate(-50%, -50%); z-index:15; padding:12px 18px;
+           font-size:11px; line-height:1.9; text-align:center; animation:pop .3s steps(3); pointer-events:none; }
+  .toast[hidden] { display:none; }
+  @keyframes pop { from { transform:translate(-50%, -50%) scale(.6); } }
+
+  /* Panels (settings, places, player) */
+  .settings { position:absolute; inset:0; z-index:20; background:#0008; display:flex;
+              align-items:flex-start; justify-content:center; padding:60px 12px 12px; overflow:auto; }
+  .settings[hidden] { display:none; }
+  .panel { width:100%; max-width:460px; padding:14px 16px 18px; }
+  .panel-head { display:flex; justify-content:space-between; align-items:center; font-size:13px; margin-bottom:6px; }
+  .panel-head button, .choice, .mini { font-family:'Press Start 2P', monospace; cursor:pointer; color:var(--ink);
+              background:var(--paper); border:4px double var(--frame); border-radius:6px; }
+  .panel-head button { font-size:10px; padding:6px 9px; }
+  .section { font-size:9px; color:var(--muted); margin:16px 0 8px; }
+  .choices { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px; }
+  .choices.small { grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); }
+  .choice { font-size:9px; padding:9px 8px; text-align:left; line-height:1.6; }
+  .choice.on { background:var(--btn); color:#202020; }
+  .choice:disabled { opacity:.45; cursor:default; }
+  .choice .sw { display:flex; gap:3px; margin-top:6px; }
+  .choice .sw i { width:16px; height:12px; border:2px solid #202020; }
+  .choice .hint { display:block; font-size:7px; color:var(--muted); margin-top:4px; }
+  .choice.on .hint { color:#4a4030; }
+  .mini { font-size:8px; padding:6px 8px; background:var(--btn); color:#202020; }
+  .row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:2px dashed var(--frame); font-size:9px; }
+  .row .grow { flex:1; line-height:1.6; min-width:0; overflow-wrap:anywhere; }
+  .row small { display:block; font-size:7px; color:var(--muted); }
+  .empty { font-size:8px; line-height:1.8; color:var(--muted); padding:6px 0; }
+  .stats { font-size:9px; line-height:2.1; }
+  .badges { display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:6px; }
+  .badge { font-size:8px; line-height:1.6; padding:8px; border:3px double var(--frame); border-radius:6px; }
+  .badge small { display:block; font-size:7px; color:var(--muted); }
+  .badge.got { background:var(--btn); color:#202020; }
+  .badge.got small { color:#4a4030; }
+  .badge.locked { opacity:.5; }
+
+  .flag { width:30px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
+  .player { width:36px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
+  /* The pulse lives on an inner box: MapLibre positions the outer element with `transform`,
+     so animating `transform` on the outer element would fight with it. */
+  .target-wrap { width:22px; height:22px; }
+  .target { width:22px; height:22px; box-sizing:border-box; border:4px solid #e8502c; box-shadow:0 0 0 2px #202020, inset 0 0 0 2px #202020;
+            animation:pulse .6s steps(2) infinite alternate; }
+  @keyframes pulse { to { transform:scale(.7); } }
+</style>
+</head>
+<body>
+<div id="gmap"></div>
+<div id="pmap"></div>
+
+<div class="hud">
+  <button class="title" id="openPlayer" type="button" aria-label="Your level and badges">MAPS+<span id="lvl">LV 1</span><span class="xpbar"><i id="xpfill"></i></span></button>
+  <div class="search">
+    <input id="search" type="search" placeholder="SEARCH A PLACE..." autocomplete="off" aria-label="Search a place">
+    <div class="box results" id="results" hidden></div>
+  </div>
+  <button id="openSettings" type="button">SETTINGS</button>
+  <button id="locate" type="button">FIND ME</button>
+  <button id="mode" type="button">CAR</button>
+  <button id="go" type="button" disabled>GO!</button>
+  <button id="start" type="button" disabled>START</button>
+  <button id="preview" type="button" disabled>PREVIEW</button>
+  <button id="traffic" type="button">TRAFFIC</button>
+  <button id="openPlaces" type="button">PLACES</button>
+  <button id="peek" type="button" title="See the real Google map underneath">PEEK GOOGLE</button>
+</div>
+
+<div class="box legend" id="legend" hidden>
+  <div><i id="legendSample"></i><span id="legendMode">CAR</span></div>
+  <div id="trafficRows">
+    <div><i data-k="clear"></i>CLEAR</div>
+    <div><i data-k="slow"></i>SLOW</div>
+    <div><i data-k="jam"></i>JAM</div>
+  </div>
+  <div class="theme-name" id="themeName"></div>
+</div>
+
+<div class="settings" id="settings" hidden>
+  <div class="box panel" role="dialog" aria-modal="true" aria-label="Settings">
+    <div class="panel-head">SETTINGS <button type="button" data-close="settings" aria-label="Close settings">X</button></div>
+    <div class="section">MAP THEME</div>
+    <div class="choices" id="mapThemes"></div>
+    <div class="section">DARK MODE</div>
+    <div class="choices small" id="darkModes"></div>
+    <div class="section">ROUTE COLORS</div>
+    <div class="choices small" id="routeThemes"></div>
+    <div class="section">FOG OF WAR</div>
+    <div class="choices small" id="fogModes"></div>
+    <div class="section">WEATHER EFFECTS</div>
+    <div class="choices small" id="weatherModes"></div>
+    <div class="section">SOUND</div>
+    <div class="choices small" id="soundModes"></div>
+    <div class="section">MORE</div>
+    <div class="choices small" id="moreActions"></div>
+  </div>
+</div>
+
+<div class="settings" id="placesPanel" hidden>
+  <div class="box panel" role="dialog" aria-modal="true" aria-label="Saved places">
+    <div class="panel-head">PLACES <button type="button" data-close="placesPanel" aria-label="Close places">X</button></div>
+    <div id="savedList"></div>
+    <div class="section">SAVE YOUR TARGET AS</div>
+    <div class="choices small" id="saveAs"></div>
+  </div>
+</div>
+
+<div class="settings" id="playerPanel" hidden>
+  <div class="box panel" role="dialog" aria-modal="true" aria-label="Player">
+    <div class="panel-head">PLAYER <button type="button" data-close="playerPanel" aria-label="Close player">X</button></div>
+    <div class="stats" id="playerStats"></div>
+    <div class="section">BADGES</div>
+    <div class="badges" id="badgeList"></div>
+  </div>
+</div>
+
+<div class="box toast" id="toast" hidden role="status" aria-live="polite"></div>
+<div class="box dialog" id="dialog"><span id="msg">You are near MG ROAD.<br>Search, or tap a spot, then press GO!</span> <span class="arrow">▼</span></div>
+
+<script>
+// Your own key from Google Cloud Console (keep this file private).
+const GOOGLE_MAPS_API_KEY = 'AIzaSyDNY2b6O13KsRTY8e2yMwRowwHE6v8Yh5s';
+const START = { lat: 12.9756, lng: 77.6066 };   // MG Road, Bengaluru
+
+const $ = (id) => document.getElementById(id);
+const msg = (html) => { $('msg').innerHTML = html; };
+const sfx = (name) => { try { if (window.Sfx) Sfx.play(name); } catch (_) {} };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const store = { get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} } };
+const R = GameRoutes;
+let gmap = null;   // the Google map, once Google has loaded
+
+// ---------- pixel overlay (MapLibre), never interactive itself ----------
+// Starts empty; the chosen theme is loaded right after (Kenney themes need their tile sheets first).
+const pmap = new maplibregl.Map({
+  container: 'pmap', style: { version: 8, sources: {}, layers: [] }, interactive: false,
+  center: [START.lng, START.lat], zoom: 16, pixelRatio: 0.5,
+  attributionControl: { compact: false }, fadeDuration: 0,
+});
+// Real-size trees in woods. Attached before the route layers so routes always draw above trees.
+const trees = Trees.attach(pmap, { icons: [], beforeId: 'water-name' });
+Fog.attach(pmap);
+
+let player = new maplibregl.Marker({ element: PixelMap.makePlayer(), anchor: 'bottom' })
+  .setLngLat([START.lng, START.lat]).addTo(pmap);
+function setPlayerSprite(el) {
+  const at = player.getLngLat(); player.remove();
+  player = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat(at).addTo(pmap);
+}
+const here = () => { const p = player.getLngLat(); return { lat: p.lat, lng: p.lng }; };
+
+// The avatar depends on theme + travel mode and faces the way you're heading.
+let packWalker = null, facing = 'right';
+function refreshAvatar() {
+  const el = Avatars.make(settings.map, R.MODES[modeIdx].id, packWalker);
+  Avatars.face(el, facing);
+  setPlayerSprite(el);
+}
+function faceToward(lng) {
+  facing = lng < player.getLngLat().lng ? 'left' : 'right';
+  Avatars.face(player.getElement(), facing);
+}
+function faceBearing(deg) {
+  facing = deg > 180 && deg < 360 ? 'left' : 'right';
+  Avatars.face(player.getElement(), facing);
+}
+const targetEl = document.createElement('div'); targetEl.className = 'target-wrap';
+targetEl.appendChild(document.createElement('div')).className = 'target';
+const target = new maplibregl.Marker({ element: targetEl });
+const flag = new maplibregl.Marker({ element: R.makeFlag(), anchor: 'bottom-left', offset: [-4, 0] });
+
+// ---------- route state ----------
+let themeIdx = Math.max(0, R.THEMES.findIndex(t => t.id === store.get('mapsplus.theme')));
+let modeIdx = 0;
+let dest = null, destName = '', route = null, steps = [], stepIdx = -1, summary = '';
+let routeFeats = [], routeStops = [], routeCoords = [];
+let routeMode = 'DRIVE';   // the travel mode the current route was drawn for (sets its line style)
+const goBtn = $('go'), startBtn = $('start'), previewBtn = $('preview'), dialog = $('dialog');
+
+function paintLegend() {
+  const t = R.THEMES[themeIdx];
+  document.querySelectorAll('#trafficRows i').forEach((i) => { i.style.background = t[i.dataset.k]; });
+  $('legendSample').style.cssText = R.sampleCSS(routeMode, t);
+  $('legendMode').textContent = R.MODES.find((m) => m.id === routeMode).label;
+  $('trafficRows').hidden = routeMode === 'WALK' || routeMode === 'TRANSIT';   // no road traffic for these
+  $('themeName').textContent = 'COLORS: ' + t.name;
+  R.applyTheme(pmap, t);
+  R.setMode(pmap, routeMode);
+}
+
+// ---------- settings ----------
+const settings = {
+  map: store.get('mapsplus.mapTheme') || MapThemes.DEFAULT,   // Roguelike RPG unless you picked another
+  dark: store.get('mapsplus.dark') || 'off',                  // off | on | auto (device) | sunset (real sun times)
+  fog: store.get('mapsplus.fog') || 'off',                    // fog of war is opt-in
+  weather: store.get('mapsplus.weather') || 'on',
+};
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const nightAt = (p) => window.Sky ? Sky.isNight(p.lat, p.lng) : ((h) => h >= 18 || h < 6)(new Date().getHours());
+const isDark = () => settings.dark === 'on' || (settings.dark === 'auto' && darkQuery.matches)
+  || (settings.dark === 'sunset' && nightAt(here()));
+let themeImages = [], themeToken = 0, sunsetTimer = 0;
+
+// In SUNSET mode, switch exactly at the next sunrise/sunset (and re-check every 10 minutes anyway).
+function scheduleSunset() {
+  clearTimeout(sunsetTimer);
+  if (settings.dark !== 'sunset') return;
+  let wait = 10 * 60 * 1000;
+  try { if (window.Sky) wait = Math.min(wait, Math.max(5000, Sky.nextChange(here().lat, here().lng) - Date.now() + 2000)); } catch (_) {}
+  sunsetTimer = setTimeout(applyMapTheme, wait);
+}
+
+async function applyMapTheme() {
+  const token = ++themeToken, dark = isDark();
+  document.body.classList.toggle('dark', dark);
+  Fog.setDark(dark);
+  if (rain) rain.setDark(dark);
+  renderSettings();
+  scheduleSunset();
+  const built = await MapThemes.build(settings.map, dark);
+  if (token !== themeToken) return;                 // a newer choice arrived while this one loaded
+  themeImages = built.images;
+  trees.setIcons(built.trees);
+  pmap.setStyle(built.style, { diff: false });
+  packWalker = built.player;          // e.g. Tiny City's own person sprite, used for WALK
+  refreshAvatar();
+}
+
+// ---------- extra pixel art: landmarks, place icons, roadblocks, stops ----------
+function fallbackIcon(color) {
+  const c = document.createElement('canvas'); c.width = c.height = 10;
+  const g = c.getContext('2d'); g.fillStyle = '#202020'; g.fillRect(0, 0, 10, 10); g.fillStyle = color; g.fillRect(2, 2, 6, 6);
+  return g.getImageData(0, 0, 10, 10);
+}
+function artImages() {
+  const A = window.PixelArt || {}, out = [];
+  (A.landmarks || []).forEach((l) => out.push({ id: 'lm-' + l.id, data: l.image }));
+  Object.entries(A.poiIcons || {}).forEach(([k, img]) => out.push({ id: 'poi-' + k, data: img }));
+  const ob = A.obstacles && (A.obstacles[settings.map] || A.obstacles.classic);
+  out.push({ id: 'roadblock', data: ob || fallbackIcon('#ff6a00') });
+  out.push({ id: 'stop-rail', data: (A.poiIcons && A.poiIcons.railway) || fallbackIcon('#8a2d98') });
+  out.push({ id: 'stop-bus', data: (A.poiIcons && A.poiIcons.bus) || fallbackIcon('#2e8b3e') });
+  return out;
+}
+function addArtLayers() {
+  const A = window.PixelArt;
+  if (!A || !pmap.getLayer('water-name')) return;
+  if (A.landmarks && A.landmarks.length && !pmap.getSource('landmarks')) {
+    pmap.addSource('landmarks', { type: 'geojson', data: { type: 'FeatureCollection', features: A.landmarks.map((l) => ({
+      type: 'Feature', properties: { id: l.id, name: l.name }, geometry: { type: 'Point', coordinates: [l.lng, l.lat] } })) } });
+    pmap.addLayer({ id: 'landmarks', type: 'symbol', source: 'landmarks', minzoom: 12.5,
+      layout: {
+        'icon-image': ['concat', 'lm-', ['get', 'id']], 'icon-anchor': 'bottom',
+        'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        'icon-size': ['interpolate', ['exponential', 1.5], ['zoom'], 12.5, 0.45, 15, 0.8, 17, 1.2, 19, 2],
+        'text-field': ['step', ['zoom'], '', 15.5, ['upcase', ['get', 'name']]], 'text-font': ['Noto Sans Bold'],
+        'text-size': 11, 'text-anchor': 'top', 'text-offset': [0, 0.3], 'text-optional': true,
+      },
+      paint: { 'text-color': '#ffffff', 'text-halo-color': '#202030', 'text-halo-width': 2 } }, 'water-name');
+  }
+  const classes = Object.keys(A.poiIcons || {});
+  if (classes.length && !pmap.getLayer('poi-icons')) {
+    pmap.addLayer({ id: 'poi-icons', type: 'symbol', source: 'omt', 'source-layer': 'poi', minzoom: 16,
+      filter: ['in', ['get', 'class'], ['literal', classes]],
+      layout: { 'icon-image': ['concat', 'poi-', ['get', 'class']], 'icon-padding': 6,
+                'icon-size': ['interpolate', ['linear'], ['zoom'], 16, 0.8, 18, 1.2] } }, 'water-name');
+  }
+}
+
+// Every new style: add textures + art, then put the route back on top (keeps an active route across switches).
+pmap.on('style.load', () => {
+  themeImages.forEach((im) => { if (!pmap.hasImage(im.id)) pmap.addImage(im.id, im.data, { pixelRatio: im.pixelRatio }); });
+  artImages().forEach((im) => { if (im.data && !pmap.hasImage(im.id)) pmap.addImage(im.id, im.data, { pixelRatio: 0.5 }); });
+  addArtLayers();
+  if (pmap.getLayer('water-name') && !pmap.getSource('route')) {
+    R.addLayers(pmap, 'water-name'); R.setRoute(pmap, routeFeats, routeStops); paintLegend();
+  }
+});
+pmap.on('styleimagemissing', (e) => {
+  const im = themeImages.find((i) => i.id === e.id);
+  if (im && !pmap.hasImage(e.id)) pmap.addImage(im.id, im.data, { pixelRatio: im.pixelRatio });
+});
+darkQuery.addEventListener('change', () => { if (settings.dark === 'auto') applyMapTheme(); });
+
+// ---------- panels ----------
+function openPanel(id, render) { if (render) render(); $(id).hidden = false; }
+document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => { $(b.dataset.close).hidden = true; }; });
+document.querySelectorAll('.settings').forEach((p) => { p.onclick = (e) => { if (e.target === p) p.hidden = true; }; });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { document.querySelectorAll('.settings').forEach((p) => { p.hidden = true; }); hideResults(); }
+});
+document.addEventListener('click', (e) => { if (e.target.closest('button')) sfx('click'); }, true);
+
+function choiceButton(label, on, onClick, colors, hint, disabled) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'choice' + (on ? ' on' : ''); b.setAttribute('aria-pressed', !!on);
+  b.textContent = label; b.disabled = !!disabled;
+  if (hint) { const h = document.createElement('span'); h.className = 'hint'; h.textContent = hint; b.appendChild(h); }
+  if (colors) {
+    const sw = document.createElement('span'); sw.className = 'sw';
+    colors.forEach((c) => { const i = document.createElement('i'); i.style.background = c; sw.appendChild(i); });
+    b.appendChild(sw);
+  }
+  b.onclick = onClick;
+  return b;
+}
+function fill(id, buttons) { const el = $(id); el.replaceChildren(...buttons); }
+
+function renderSettings() {
+  const dark = isDark();
+  fill('mapThemes', MapThemes.LIST.map((t) => choiceButton(t.name, t.id === settings.map, () => {
+    settings.map = t.id; store.set('mapsplus.mapTheme', t.id); applyMapTheme();
+  }, MapThemes.swatch(t.id, dark), t.id === MapThemes.DEFAULT ? 'DEFAULT' : '')));
+
+  fill('darkModes', [['off', 'OFF'], ['on', 'ON'], ['auto', 'AUTO', 'FOLLOWS DEVICE'], ['sunset', 'SUNSET', 'REAL SUN TIMES']]
+    .map(([v, label, hint]) => choiceButton(label, settings.dark === v, () => {
+      settings.dark = v; store.set('mapsplus.dark', v); applyMapTheme();
+    }, null, hint)));
+
+  fill('routeThemes', R.THEMES.map((t, k) => choiceButton(t.name, k === themeIdx, () => {
+    themeIdx = k; store.set('mapsplus.theme', t.id); paintLegend(); renderSettings();
+  }, [t.clear, t.slow, t.jam])));
+
+  fill('fogModes', [['off', 'OFF'], ['on', 'ON', 'REVEALS WHERE YOU GO (GPS)']].map(([v, label, hint]) =>
+    choiceButton(label, settings.fog === v, () => {
+      settings.fog = v; store.set('mapsplus.fog', v); Fog.enable(v === 'on'); updateWatch(); renderSettings();
+      if (v === 'on') msg(`FOG OF WAR is on.<br>Squares explored: ${Fog.count()}. Go outside!`);
+    }, null, hint)));
+
+  fill('weatherModes', [['on', 'ON', 'LIVE RAIN'], ['off', 'OFF']].map(([v, label, hint]) =>
+    choiceButton(label, settings.weather === v, () => {
+      settings.weather = v; store.set('mapsplus.weather', v); checkWeather(); renderSettings();
+    }, null, hint, !window.Sky)));
+
+  const soundOn = !!(window.Sfx && Sfx.enabled);
+  fill('soundModes', [[true, 'ON'], [false, 'OFF']].map(([v, label]) =>
+    choiceButton(label, soundOn === v, () => { if (window.Sfx) Sfx.enabled = v; renderSettings(); }, null, '', !window.Sfx)));
+
+  const peekOn = $('pmap').classList.contains('peek');
+  const more = [choiceButton(peekOn ? 'BACK TO GAME' : 'PEEK GOOGLE', peekOn, () => {
+    togglePeek(); renderSettings();
+  }, null, 'SEE THE REAL MAP')];
+  if (window.PWA) more.push(choiceButton('INSTALL APP', false, async () => {
+    const r = await PWA.install(); if (r === 'accepted') toast('INSTALLED!<br>Find MAPS+ on your home screen'); renderSettings();
+  }, null, PWA.canInstall ? 'ADD TO HOME SCREEN' : 'NOT AVAILABLE HERE', !PWA.canInstall));
+  fill('moreActions', more);
+}
+$('openSettings').onclick = () => openPanel('settings', renderSettings);
+
+// PEEK GOOGLE (main screen and Settings): fade the game map away to show Google's real map underneath.
+function togglePeek() {
+  const on = $('pmap').classList.toggle('peek');
+  $('peek').classList.toggle('on', on);
+  $('peek').textContent = on ? 'BACK TO GAME' : 'PEEK GOOGLE';
+  $('peek').setAttribute('aria-pressed', on);
+}
+$('peek').onclick = togglePeek;
+// Show / hide INSTALL APP as soon as the browser says installing is possible.
+if (window.PWA) PWA.onChange(() => { if (!$('settings').hidden) renderSettings(); });
+
+// ---------- toasts, XP and badges ----------
+const toastQueue = []; let toastBusy = false;
+function toast(html) { toastQueue.push(html); if (!toastBusy) nextToast(); }
+function nextToast() {
+  const h = toastQueue.shift();
+  if (!h) { toastBusy = false; return; }
+  toastBusy = true; $('toast').innerHTML = h; $('toast').hidden = false;
+  setTimeout(() => { $('toast').hidden = true; setTimeout(nextToast, 250); }, 2400);
+}
+function renderXp() {
+  const i = Progress.levelInfo();
+  $('lvl').textContent = 'LV ' + i.level;
+  $('xpfill').style.width = Math.round(i.pct * 100) + '%';
+}
+Progress.on((ev) => {
+  renderXp();
+  if (ev.type === 'badge') { sfx('badge'); toast(`BADGE GET!<br>${esc(ev.badge.name)}`); }
+  if (ev.type === 'levelup') { sfx('levelup'); toast(`LEVEL UP!<br>YOU ARE NOW LV ${ev.level}`); }
+});
+renderXp();
+
+function renderPlayer() {
+  const i = Progress.levelInfo(), s = Progress.state, km = (v) => (v || 0).toFixed(1) + ' KM';
+  $('playerStats').innerHTML = [
+    `LEVEL ${i.level} · ${s.xp} XP`, `NEXT LEVEL: ${i.need - i.into} XP`,
+    `WALKED ${km(s.km.WALK)}`, `RODE ${km(s.km.TWO_WHEELER)}`, `DROVE ${km(s.km.DRIVE)}`, `METRO/BUS ${km(s.km.TRANSIT)}`,
+    `PARKS ${s.parks.length} · LANDMARKS ${s.landmarks.length}`, `SQUARES EXPLORED ${s.cells}`,
+  ].map(esc).join('<br>') + '<div class="empty">XP is earned while START navigation or FOG OF WAR is on (uses GPS).</div>';
+  $('badgeList').replaceChildren(...Progress.BADGES.map((b) => {
+    const el = document.createElement('div'); const got = !!s.badges[b.id];
+    el.className = 'badge ' + (got ? 'got' : 'locked');
+    el.innerHTML = `${got ? '★ ' : ''}${esc(b.name)}<small>${esc(b.desc)}</small>`;
+    return el;
+  }));
+}
+$('openPlayer').onclick = () => openPanel('playerPanel', renderPlayer);
+
+// ---------- saved places ----------
+let saved = (() => { try { return JSON.parse(store.get('mapsplus.saved')) || []; } catch (_) { return []; } })();
+let savedMarkers = [];
+function iconCanvas(img, scale) {
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  c.getContext('2d').putImageData(img, 0, 0);
+  c.style.cssText = `width:${img.width * scale}px;height:${img.height * scale}px;image-rendering:pixelated;filter:drop-shadow(2px 2px 0 #0005);display:block`;
+  return c;
+}
+const SAVED_COLORS = { home: '#3a78d8', work: '#8a5a2c', favorite: '#e8302c' };
+const savedIcon = (type, scale = 2) => {
+  const img = window.PixelArt && PixelArt.savedIcons && PixelArt.savedIcons[type];
+  return iconCanvas(img || fallbackIcon(SAVED_COLORS[type] || '#e8302c'), scale);
+};
+function renderSavedMarkers() {
+  savedMarkers.forEach((m) => m.remove());
+  savedMarkers = saved.map((p) => new maplibregl.Marker({ element: savedIcon(p.type), anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(pmap));
+}
+function persistSaved() { store.set('mapsplus.saved', JSON.stringify(saved)); renderSavedMarkers(); renderPlaces(); }
+function saveDest(type) {
+  if (!dest) return;
+  if (type !== 'favorite') saved = saved.filter((p) => p.type !== type);   // one HOME, one WORK
+  saved.push({ id: Date.now().toString(36), type, name: destName || type.toUpperCase(), lat: dest.lat, lng: dest.lng });
+  persistSaved(); sfx('save'); toast(`SAVED AS ${type.toUpperCase()}!`);
+}
+function renderPlaces() {
+  const list = $('savedList');
+  if (!saved.length) {
+    list.innerHTML = '<div class="empty">No saved places yet. Tap a spot or search, then save it below.</div>';
+  } else {
+    const order = { home: 0, work: 1, favorite: 2 };
+    list.replaceChildren(...[...saved].sort((a, b) => order[a.type] - order[b.type]).map((p) => {
+      const row = document.createElement('div'); row.className = 'row';
+      row.appendChild(savedIcon(p.type, 2));
+      const t = document.createElement('div'); t.className = 'grow';
+      t.innerHTML = `${esc(p.name)}<small>${esc(p.type.toUpperCase())}</small>`;
+      const go = document.createElement('button'); go.type = 'button'; go.className = 'mini'; go.textContent = 'GO';
+      go.onclick = () => { $('placesPanel').hidden = true; setDestination({ lat: p.lat, lng: p.lng }, p.name); findRoute(); };
+      const del = document.createElement('button'); del.type = 'button'; del.className = 'mini'; del.textContent = 'X';
+      del.setAttribute('aria-label', 'Delete ' + p.name);
+      del.onclick = () => { saved = saved.filter((x) => x.id !== p.id); persistSaved(); };
+      row.append(t, go, del);
+      return row;
+    }));
+  }
+  fill('saveAs', ['home', 'work', 'favorite'].map((type) =>
+    choiceButton(type.toUpperCase(), false, () => saveDest(type), null, dest ? '' : 'PICK A TARGET FIRST', !dest)));
+}
+$('openPlaces').onclick = () => openPanel('placesPanel', renderPlaces);
+renderSavedMarkers();
+
+// ---------- picking a destination ----------
+function describe(ll) {
+  const feats = pmap.queryRenderedFeatures(pmap.project([ll.lng, ll.lat]));
+  const named = feats.find((f) => f.properties && f.properties.name && !f.layer.id.startsWith('route'));
+  const kind = feats.find((f) => ['building', 'park', 'water', 'road'].includes(f.layer.id));
+  return named ? named.properties.name.toUpperCase()
+       : kind ? { building: 'that BUILDING', park: 'the GRASS', water: 'the WATER', road: 'that ROAD' }[kind.layer.id]
+       : 'that SPOT';
+}
+function setDestination(pos, name) {
+  dest = { lat: pos.lat, lng: pos.lng };
+  destName = name ? String(name).toUpperCase() : describe(dest);
+  target.setLngLat([dest.lng, dest.lat]).addTo(pmap);
+  flag.remove();
+  faceToward(dest.lng);
+  goBtn.disabled = false;
+  msg(`Go to ${esc(destName)}?<br>Press GO! (${R.MODES[modeIdx].label})`);
+}
+
+// ---------- search (Google Places) ----------
+let placesLib = null, sessionToken = null, searchTimer = 0, searchSeq = 0;
+const resultsEl = $('results'), searchEl = $('search');
+function hideResults() { resultsEl.hidden = true; resultsEl.replaceChildren(); }
+function resultsNote(text) { resultsEl.innerHTML = `<div class="note">${esc(text)}</div>`; resultsEl.hidden = false; }
+searchEl.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchEl.value.trim();
+  if (q.length < 3) { hideResults(); return; }
+  searchTimer = setTimeout(() => runSearch(q), 350);   // wait for a pause in typing (fewer paid requests)
+});
+searchEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const b = resultsEl.querySelector('button'); if (b) b.click(); } });
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.search')) hideResults(); });
+async function runSearch(q) {
+  if (!gmap) return;
+  const seq = ++searchSeq;
+  try {
+    placesLib = placesLib || await google.maps.importLibrary('places');
+    sessionToken = sessionToken || new placesLib.AutocompleteSessionToken();
+    const c = gmap.getCenter();
+    const { suggestions } = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+      input: q, sessionToken, includedRegionCodes: ['in'],
+      locationBias: { center: { lat: c.lat(), lng: c.lng() }, radius: 30000 },
+    });
+    if (seq !== searchSeq) return;
+    const preds = suggestions.map((s) => s.placePrediction).filter(Boolean).slice(0, 6);
+    if (!preds.length) { resultsNote('Nothing found. Try another name.'); return; }
+    resultsEl.replaceChildren(...preds.map((p) => {
+      const b = document.createElement('button'); b.type = 'button';
+      b.innerHTML = `${esc(p.mainText ? p.mainText.text : p.text.text)}<small>${esc(p.secondaryText ? p.secondaryText.text : '')}</small>`;
+      b.onclick = () => choosePlace(p);
+      return b;
+    }));
+    resultsEl.hidden = false;
+  } catch (err) {
+    console.warn('Search error:', err);
+    const m = String(err && err.message || '');
+    if (seq === searchSeq) resultsNote(/blocked|permission denied/i.test(m)
+      ? 'Your key blocks search: add "Places API (New)" to the key\'s allowed APIs.'
+      : /not been used|disabled/i.test(m) ? 'Search needs "Places API (New)" enabled in Google Cloud.'
+      : 'Search failed. Check your connection and try again.');
+  }
+}
+async function choosePlace(prediction) {
+  try {
+    const place = prediction.toPlace();
+    // Only ask for `location`: it's billed as Place Details *Essentials*. (`displayName` would make it *Pro*,
+    // which costs more; the name already comes free with the suggestion.) Ending the session with an
+    // Essentials call also makes the typing requests in that session free ("Autocomplete Session Usage").
+    await place.fetchFields({ fields: ['location'] });
+    sessionToken = null;
+    hideResults(); searchEl.value = ''; searchEl.blur();
+    const pos = { lat: place.location.lat(), lng: place.location.lng() };
+    setDestination(pos, prediction.mainText ? prediction.mainText.text : prediction.text.text);
+    if (gmap) gmap.panTo(pos);
+  } catch (err) { console.warn(err); resultsNote('Could not open that place.'); }
+}
+
+// ---------- routes ----------
+const fmtKm = (m) => m >= 1000 ? (m / 1000).toFixed(1) + ' KM' : Math.round(m) + ' M';
+const secs = (d) => parseInt(d || '0', 10);
+
+function showStep() {
+  if (stepIdx < 0) { msg(summary || 'Search, or tap a spot, then press GO!'); return; }
+  const s = steps[stepIdx];
+  msg(`STEP ${stepIdx + 1}/${steps.length} (${fmtKm(s.distanceMeters || 0)})<br>${esc(s.text)}`);
+}
+dialog.onclick = () => {
+  if (!steps.length || nav.active) return;
+  stepIdx = stepIdx + 1 >= steps.length ? -1 : stepIdx + 1;
+  showStep();
+};
+
+async function findRoute(opts = {}) {
+  if (!dest || !gmap) return;
+  if (!GOOGLE_MAPS_API_KEY) { msg('Directions need your<br>Google API key.'); return; }
+  const from = here(), mode = R.MODES[modeIdx];
+  goBtn.disabled = true;
+  if (!opts.keepNav) msg(`Finding a ${mode.label} route...`);
+  try {
+    route = await R.computeRoute(GOOGLE_MAPS_API_KEY, from, dest, mode.id);
+  } catch (err) {
+    goBtn.disabled = false; sfx('error');
+    const hint = err.status === 403 ? '<br>Enable "Routes API" for your key.'
+      : mode.id === 'TRANSIT' ? '<br>No metro/bus way here. Try WALK or CAR.' : '';
+    msg(`No route! ${esc(err.message).slice(0, 80)}${hint}`);
+    console.warn('Routes API error:', err);
+    return;
+  }
+  const r = R.featuresFor(route, mode.id);
+  const feats = r.feats; let coords = r.coords;
+  // Roads often end before the tapped spot (e.g. inside a park): add a short "walk the last bit" line.
+  const end = coords[coords.length - 1];
+  if (end && Geo.dist({ lng: end[0], lat: end[1] }, dest) > 15) {
+    feats.push({ type: 'Feature', properties: { speed: 'WALK' }, geometry: { type: 'LineString', coordinates: [end, [dest.lng, dest.lat]] } });
+    coords = [...coords, [dest.lng, dest.lat]];
+  }
+  routeFeats = feats; routeStops = r.stops; routeCoords = coords; routeMode = mode.id;
+  R.setRoute(pmap, feats, routeStops);
+  paintLegend();                       // also switches the line style for this mode
+  faceToward(coords[Math.min(6, coords.length - 1)][0]);
+  target.remove();
+  flag.setLngLat([dest.lng, dest.lat]).addTo(pmap);
+  $('legend').hidden = false;
+
+  const dur = secs(route.duration), base = secs(route.staticDuration), delay = Math.max(0, dur - base);
+  const jams = feats.filter((f) => f.properties.speed === 'TRAFFIC_JAM').length;
+  const slows = feats.filter((f) => f.properties.speed === 'SLOW').length;
+  const rides = feats.filter((f) => f.properties.speed === 'TRANSIT').length;
+  const line = mode.id === 'WALK' ? 'No traffic on foot!'
+    : mode.id === 'TRANSIT' ? (rides ? `${rides} RIDE${rides > 1 ? 'S' : ''} + some walking.` : 'Walking is quicker here!')
+    : delay >= 60 ? `Traffic adds ${Math.round(delay / 60)} MIN` + (jams ? ` (${jams} ROADBLOCK${jams > 1 ? 'S' : ''})` : '')
+    : (jams || slows) ? 'A little slow in spots.' : 'Roads are CLEAR!';
+  summary = `${esc(destName)}: ${fmtKm(route.distanceMeters || 0)}, ${Math.max(1, Math.round(dur / 60))} MIN<br>${line} Tap for steps.`;
+  steps = r.steps; stepIdx = -1;
+  dialog.classList.toggle('clickable', steps.length > 0);
+  goBtn.disabled = false; startBtn.disabled = false; previewBtn.disabled = false;
+  sfx('found');
+  if (opts.keepNav) { nav.stepIdx = 0; showNavStep(); return; }
+  showStep();
+  const b = new google.maps.LatLngBounds();
+  coords.forEach(([lng, lat]) => b.extend({ lat, lng }));
+  gmap.fitBounds(b, { top: 170, bottom: 140, left: 40, right: 40 });   // the overlay follows
+}
+goBtn.onclick = () => findRoute();
+
+$('mode').onclick = (e) => {
+  modeIdx = (modeIdx + 1) % R.MODES.length;
+  e.currentTarget.textContent = R.MODES[modeIdx].label;
+  refreshAvatar();
+  if (route) findRoute({ keepNav: nav.active });
+};
+
+// ---------- route preview run ----------
+let previewing = false;
+previewBtn.onclick = () => {
+  if (!routeCoords.length || previewing || nav.active) return;
+  previewing = true; previewBtn.disabled = true;
+  const home = player.getLngLat(), L = Geo.length(routeCoords);
+  const dur = Math.min(8000, Math.max(3500, L / 2)), t0 = performance.now();
+  msg('PREVIEW RUN!<br>Watch the way...');
+  (function frame(now) {
+    const t = Math.min(1, (now - t0) / dur), e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const p = Geo.atDistance(routeCoords, L * e);
+    player.setLngLat([p.lng, p.lat]); faceBearing(p.bearing);
+    if (t < 1) { requestAnimationFrame(frame); return; }
+    sfx('arrive');
+    setTimeout(() => {
+      player.setLngLat(home); previewing = false; previewBtn.disabled = false;
+      faceToward(routeCoords[Math.min(6, routeCoords.length - 1)][0]); showStep();
+    }, 800);
+  })(t0);
+};
+
+// ---------- live navigation + tracking (GPS) ----------
+const nav = { active: false, stepIdx: 0, offCount: 0, lastReroute: 0, follow: true };
+let watchId = null, lastFix = null;
+const wantWatch = () => nav.active || settings.fog === 'on';
+function updateWatch() {
+  if (!navigator.geolocation) return;
+  if (wantWatch() && watchId === null) {
+    watchId = navigator.geolocation.watchPosition(onFix, onFixError, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+  } else if (!wantWatch() && watchId !== null) {
+    navigator.geolocation.clearWatch(watchId); watchId = null; lastFix = null;
+  }
+}
+function onFixError(e) {
+  if (nav.active) msg(e.code === 1 ? 'Location is blocked.<br>Allow it to navigate.' : 'Looking for GPS signal...');
+}
+function showNavStep() {
+  const s = steps[nav.stepIdx]; if (!s) return;
+  msg(`STEP ${nav.stepIdx + 1}/${steps.length} (${fmtKm(s.distanceMeters || 0)})<br>${esc(s.text)}`);
+}
+function startNav() {
+  if (!route) return;
+  if (!navigator.geolocation) { msg('This device cannot<br>share its location.'); return; }
+  Object.assign(nav, { active: true, stepIdx: 0, offCount: 0, follow: true });
+  startBtn.textContent = 'STOP'; startBtn.classList.add('on');
+  Progress.tripStarted();
+  showNavStep(); updateWatch();
+}
+function stopNav(text) {
+  nav.active = false; startBtn.textContent = 'START'; startBtn.classList.remove('on');
+  updateWatch(); if (text) msg(text);
+}
+startBtn.onclick = () => (nav.active ? stopNav('Navigation stopped.<br>Press START to resume.') : startNav());
+
+function onFix(p) {
+  if (previewing) return;
+  const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
+  const acc = p.coords.accuracy || 999, t = p.timestamp || Date.now();
+  player.setLngLat([pos.lng, pos.lat]);
+  explore(pos);
+  if (lastFix && acc < 50) {
+    const d = Geo.dist(lastFix.pos, pos), dt = Math.max(1, (t - lastFix.t) / 1000);
+    if (d >= 3) faceBearing(Geo.bearing(lastFix.pos, pos));
+    if (d >= 2 && d < 300) {            // ignore GPS jitter and jumps
+      const speed = p.coords.speed != null && p.coords.speed >= 0 ? p.coords.speed : d / dt;
+      const mode = nav.active ? routeMode : speed < 2.5 ? 'WALK' : speed < 9 ? 'TWO_WHEELER' : 'DRIVE';
+      Progress.addDistance(d, mode);
+      if (nightAt(pos)) Progress.markNight();
+    }
+  }
+  if (acc < 50) lastFix = { pos, t };
+  if (nav.active) navUpdate(pos);
+}
+
+// Parks, lakes and landmarks you're standing at (counts toward badges).
+function explore(pos) {
+  if (Fog.visit(pos.lat, pos.lng)) Progress.visitCell();
+  try {
+    const pt = pmap.project([pos.lng, pos.lat]);
+    const feats = pmap.queryRenderedFeatures([[pt.x - 14, pt.y - 14], [pt.x + 14, pt.y + 14]]);
+    const park = feats.find((f) => f.layer.id === 'park' && f.properties.name);
+    if (park && Progress.visitPark(park.properties.name)) toast(`VISITED<br>${esc(park.properties.name.toUpperCase())}!`);
+    if (feats.some((f) => f.layer.id === 'water')) Progress.visitLake();
+  } catch (_) {}
+  ((window.PixelArt && PixelArt.landmarks) || []).forEach((l) => {
+    if (Geo.dist(pos, l) < 150 && Progress.visitLandmark(l.id)) toast(`LANDMARK FOUND!<br>${esc(l.name.toUpperCase())} +30 XP`);
+  });
+}
+
+function navUpdate(pos) {
+  if (nav.follow && gmap) gmap.panTo(pos);
+  if (dest && Geo.dist(pos, dest) < 30) {
+    sfx('arrive'); Progress.tripFinished(routeMode);
+    stopNav(`You arrived at ${esc(destName)}!<br>+25 XP. Well played!`);
+    return;
+  }
+  let s = steps[nav.stepIdx];
+  while (s && s.end && Geo.dist(pos, s.end) < 25 && nav.stepIdx < steps.length - 1) {
+    nav.stepIdx++; s = steps[nav.stepIdx]; sfx('step'); showNavStep();
+  }
+  // Off route for 3 fixes in a row: find a new way (at most every 30 s, to limit paid requests).
+  nav.offCount = Geo.toLine(pos, routeCoords).dist > 60 ? nav.offCount + 1 : 0;
+  if (nav.offCount >= 3 && Date.now() - nav.lastReroute > 30000) {
+    nav.lastReroute = Date.now(); nav.offCount = 0;
+    msg('Off route!<br>Finding a new way...'); sfx('error');
+    findRoute({ keepNav: true });
+  }
+}
+
+// ---------- weather ----------
+let rain = null, toldWeather = false;
+async function checkWeather() {
+  if (!window.Sky) return;
+  if (!rain) rain = Sky.createRain(document.body, { zIndex: 4 });
+  rain.setDark(isDark());
+  if (settings.weather !== 'on') { rain.stop(); return; }
+  const p = here(), w = await Sky.weather(p.lat, p.lng);
+  if (!w) return;
+  if (w.raining) {
+    rain.start(w.intensity || (w.heavy ? 1 : 0.5));
+    if (!toldWeather) { toldWeather = true; toast(`${esc(w.label)} IN BENGALURU!<br>STAY DRY OUT THERE`); }
+  } else rain.stop();
+}
+setInterval(checkWeather, 15 * 60 * 1000);
+
+Fog.enable(settings.fog === 'on');
+updateWatch();
+applyMapTheme();
+
+// ---------- Google map underneath, the one you actually touch ----------
+window.initMap = () => {
+  gmap = new google.maps.Map($('gmap'), {
+    center: START, zoom: 17,
+    // TODO: replace DEMO_MAP_ID (Google's testing ID) with your own map ID:
+    //       Cloud Console → Map Management → Create map ID → JavaScript → Vector.
+    mapId: 'DEMO_MAP_ID',               // vector map: smooth fractional zoom keeps the overlay aligned
+    renderingType: google.maps.RenderingType.VECTOR,   // ask for vector explicitly (raster can't sync per frame)
+    isFractionalZoomEnabled: true,
+    headingInteractionEnabled: false, tiltInteractionEnabled: false,
+    disableDefaultUI: true, gestureHandling: 'greedy', keyboardShortcuts: false,
+    // Google's own map is mostly hidden, but shows through in TRAFFIC view; match the dark setting at load.
+    colorScheme: google.maps.ColorScheme ? (isDark() ? google.maps.ColorScheme.DARK : google.maps.ColorScheme.LIGHT) : undefined,
+  });
+
+  // ---------- camera sync ----------
+  // Apply a camera to the pixel map and paint it immediately (not on MapLibre's next frame),
+  // so both canvases change in the same browser frame.
+  const gEl = $('gmap');
+  let last = '';
+  function apply(lng, lat, zoom) {
+    const key = lng.toFixed(9) + ',' + lat.toFixed(9) + ',' + zoom.toFixed(6);
+    if (key === last) return;
+    last = key;
+    pmap.jumpTo({ center: [lng, lat], zoom });
+    try { pmap.redraw(); } catch (_) { /* style still loading; MapLibre paints on its own */ }
+  }
+  // Simple path: read Google's camera. Google zoom uses 256px tiles and MapLibre uses 512px tiles,
+  // so MapLibre zoom = Google zoom - 1.
+  function syncFromCamera() {
+    const c = gmap.getCenter(), z = gmap.getZoom();
+    if (c && z != null) apply(c.lng(), c.lat(), z - 1);
+  }
+  // Exact path (vector Google maps): inside Google's own draw call, project two points with the
+  // exact matrix Google is drawing this frame, and solve for the matching MapLibre camera.
+  function screenOf(transformer, lat, lng, W, H) {
+    const m = transformer.fromLatLngAltitude({ lat, lng, altitude: 0 });   // column-major 4x4
+    const w = m[15];
+    return { x: (m[12] / w + 1) / 2 * W, y: (1 - m[13] / w) / 2 * H };
+  }
+  function syncFromTransformer(transformer) {
+    const c = gmap.getCenter(); if (!c) return;
+    const W = gEl.clientWidth, H = gEl.clientHeight;
+    const a = { lat: c.lat(), lng: c.lng() }, b = { lat: a.lat + 0.002, lng: a.lng + 0.002 };
+    const sA = screenOf(transformer, a.lat, a.lng, W, H), sB = screenOf(transformer, b.lat, b.lng, W, H);
+    const mA = maplibregl.MercatorCoordinate.fromLngLat([a.lng, a.lat]);
+    const mB = maplibregl.MercatorCoordinate.fromLngLat([b.lng, b.lat]);
+    const worldPx = Math.hypot(sB.x - sA.x, sB.y - sA.y) / Math.hypot(mB.x - mA.x, mB.y - mA.y);
+    if (!isFinite(worldPx) || worldPx <= 0) return syncFromCamera();
+    const center = new maplibregl.MercatorCoordinate(
+      mA.x - (sA.x - W / 2) / worldPx, mA.y - (sA.y - H / 2) / worldPx).toLngLat();
+    apply(center.lng, center.lat, Math.log2(worldPx / 512));
+  }
+  let exact = false;
+  if (google.maps.WebGLOverlayView) {
+    const glSync = new google.maps.WebGLOverlayView();
+    // Google calls all of these; we only draw on the MapLibre canvas, so most are no-ops.
+    glSync.onAdd = () => {};
+    glSync.onContextRestored = () => {};
+    glSync.onContextLost = () => {};
+    glSync.onStateUpdate = () => {};
+    glSync.onRemove = () => {};
+    glSync.onDraw = ({ transformer }) => { exact = true; syncFromTransformer(transformer); };
+    glSync.setMap(gmap);
+  }
+  // Fallback for raster Google maps (no WebGL draw hook): follow camera events plus every frame.
+  gmap.addListener('bounds_changed', () => { if (!exact) syncFromCamera(); });
+  (function tick() { if (!exact) syncFromCamera(); requestAnimationFrame(tick); })();
+  // Keep both maps the same size at the same moment when the window changes.
+  new ResizeObserver(() => { pmap.resize(); last = ''; syncFromCamera(); }).observe(gEl);
+  window.__maps = { gmap, pmap, isExact: () => exact };   // handy for debugging alignment
+
+  // Taps on Google pick the destination.
+  gmap.addListener('click', (e) => {
+    if (e.placeId) e.stop();            // Google's own info window would be hidden under the overlay anyway
+    hideResults();
+    setDestination({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+  });
+  // Dragging the map while navigating pauses "follow me"; FIND ME turns it back on.
+  gmap.addListener('dragstart', () => { if (nav.active) nav.follow = false; });
+
+  // Area-wide live traffic: only Google can draw it (in Google's colors), so the game map fades to let it show.
+  const trafficLayer = new google.maps.TrafficLayer();
+  $('traffic').onclick = (e) => {
+    const on = !trafficLayer.getMap();
+    trafficLayer.setMap(on ? gmap : null);
+    $('pmap').classList.toggle('traffic-view', on);
+    e.currentTarget.classList.toggle('on', on);
+    if (on) msg('LIVE TRAFFIC for the whole area<br>(Google colors). Tap TRAFFIC to hide.');
+    else showStep();
+  };
+
+  $('locate').onclick = () => {
+    if (!navigator.geolocation) { msg('This device cannot<br>share its location.'); return; }
+    nav.follow = true;
+    msg('Looking for you...');
+    navigator.geolocation.getCurrentPosition((p) => {
+      const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
+      gmap.panTo(pos);
+      player.setLngLat([pos.lng, pos.lat]);
+      explore(pos);
+      msg('Found you!<br>Where do you want to go?');
+    }, () => msg('Location was blocked.<br>Allow it in the browser.'), { enableHighAccuracy: true });
+  };
+
+  setTimeout(checkWeather, 1500);
+};
+
+const s = document.createElement('script');
+s.src = 'https://maps.googleapis.com/maps/api/js?callback=initMap&loading=async&v=weekly'
+      + (GOOGLE_MAPS_API_KEY ? '&key=' + encodeURIComponent(GOOGLE_MAPS_API_KEY) : '');
+s.async = true;
+document.head.appendChild(s);
+</script>
+</body>
+</html>

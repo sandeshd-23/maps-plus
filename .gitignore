@@ -1,0 +1,15 @@
+# Local-only files (not needed on the website)
+.claude/
+assets/kenney/_zips/
+assets/kenney/**/*.url
+# Kenney files the app doesn't use (it only reads the packed tile sheets; licenses are kept)
+assets/kenney/*/Tiles/
+assets/kenney/*/Preview.png
+assets/kenney/*/Sample*.png
+assets/kenney/*/Map/
+assets/kenney/*/Tilemap/tilemap.png
+assets/kenney/roguelike-rpg-pack/Spritesheet/roguelikeSheet_magenta.png
+__pycache__/
+*.pyc
+Thumbs.db
+desktop.ini

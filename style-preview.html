@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maps+ Style Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="pixel-style.js"></script>
+<script src="trees.js"></script>
+<script src="kenney-styles.js"></script>
+<style>
+  :root { --ink:#202020; --paper:#f8f8f0; --frame:#303040; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#14161c; }
+  #map { position:absolute; inset:0; }
+  #map .maplibregl-canvas { image-rendering:pixelated; image-rendering:crisp-edges; }
+  .bar { position:absolute; left:12px; right:12px; z-index:5; display:flex; gap:8px; flex-wrap:wrap; }
+  .bar.top { top:12px; } .bar.places { top:64px; }
+  .bar button { font-family:'Press Start 2P', monospace; font-size:10px; padding:9px 11px; cursor:pointer;
+                background:#ffcc33; color:var(--ink); border:5px double var(--frame); border-radius:6px; }
+  .bar.places button { font-size:8px; padding:7px 9px; background:var(--paper); }
+  .bar button.on { background:#7ad46e; }
+  .credit { position:absolute; left:12px; bottom:12px; z-index:5; font-family:'Press Start 2P', monospace;
+            font-size:9px; color:var(--ink); background:var(--paper); border:5px double var(--frame);
+            border-radius:6px; padding:8px 10px; }
+  .player { width:36px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
+  .player.kenney { width:42px; height:42px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="bar top" id="themes"></div>
+<div class="bar places" id="places"></div>
+<div class="credit" id="credit"></div>
+
+<script>
+const START = [77.6066, 12.9756];
+const map = new maplibregl.Map({
+  container: 'map', style: PixelMap.style, center: START, zoom: 16, pixelRatio: 0.5,
+  attributionControl: { compact: true },
+});
+const IMG_RATIO = 0.5;   // one sheet pixel = one rendered pixel (then CSS doubles it, crisp)
+
+let currentImages = {};
+let original = true;
+map.on('style.load', () => {
+  if (original) Object.keys(PixelMap.textures).forEach((id) => { if (!map.hasImage(id)) map.addImage(id, PixelMap.textures[id]); });
+  Object.entries(currentImages).forEach(([id, img]) => { if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: IMG_RATIO }); });
+});
+map.on('styleimagemissing', (e) => {
+  if (currentImages[e.id]) map.addImage(e.id, currentImages[e.id], { pixelRatio: IMG_RATIO });
+  else if (PixelMap.textures[e.id]) map.addImage(e.id, PixelMap.textures[e.id]);
+});
+
+const trees = Trees.attach(map, { icons: PixelMap.treeIcons, beforeId: 'water-name' });
+
+let marker = new maplibregl.Marker({ element: PixelMap.makePlayer(), anchor: 'bottom' }).setLngLat(START).addTo(map);
+function setPlayer(el) {
+  const at = marker.getLngLat(); marker.remove();
+  marker = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat(at).addTo(map);
+}
+
+const options = [{ id: 'original', name: 'CURRENT', credit: 'Current style (original art)' }, ...KenneyStyles.THEMES];
+const bar = document.getElementById('themes');
+async function choose(opt, btn) {
+  bar.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn));
+  document.getElementById('credit').textContent = opt.credit;
+  if (opt.id === 'original') {
+    original = true; currentImages = {};
+    trees.setIcons(PixelMap.treeIcons);
+    map.setStyle(PixelMap.style, { diff: false });
+    setPlayer(PixelMap.makePlayer());
+    return;
+  }
+  const built = await KenneyStyles.build(opt);
+  original = false; currentImages = built.images;
+  trees.setIcons(built.trees);
+  map.setStyle(built.style, { diff: false });
+  setPlayer(built.player || PixelMap.makePlayer());
+}
+options.forEach((o, i) => {
+  const b = document.createElement('button'); b.textContent = o.name; b.onclick = () => choose(o, b); bar.appendChild(b);
+  if (i === 0) { b.classList.add('on'); document.getElementById('credit').textContent = o.credit; }
+});
+
+const places = [
+  { name: 'MG ROAD', at: [77.6066, 12.9756], z: 16.5 },
+  { name: 'ULSOOR LAKE', at: [77.6205, 12.9817], z: 16 },
+  { name: 'CUBBON PARK', at: [77.5946, 12.9763], z: 16 },
+  { name: 'KORAMANGALA', at: [77.6245, 12.9352], z: 16.5 },
+  { name: 'ZOOMED OUT', at: [77.6066, 12.9700], z: 14 },
+];
+const pbar = document.getElementById('places');
+places.forEach((p) => {
+  const b = document.createElement('button'); b.textContent = p.name;
+  b.onclick = () => { map.jumpTo({ center: p.at, zoom: p.z }); marker.setLngLat(p.at); };
+  pbar.appendChild(b);
+});
+window.__preview = { map, choose, options, trees };
+</script>
+</body>
+</html>
