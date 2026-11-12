@@ -11,7 +11,7 @@
 <script src="pwa.js"></script>
 <script>if (window.PWA) PWA.register();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Roboto:wght@400;600&display=swap" rel="stylesheet">
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="pixel-style.js"></script>
@@ -125,6 +125,25 @@
   .badge.locked { opacity:.5; }
 
   .flag { width:30px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
+  /* Your position on Google's own map (visible when you PEEK GOOGLE) */
+  .gme { width:14px; height:14px; border-radius:50%; background:#4285f4; border:3px solid #fff;
+         box-shadow:0 0 0 2px #0003, 0 0 0 12px #4285f430; }
+  /* Place card (photos, description, reviews) */
+  #infoBtn { margin-left:8px; vertical-align:middle; }
+  .place-photos { display:flex; gap:8px; overflow-x:auto; padding:2px 0 8px; }
+  .place-photos figure { margin:0; flex:0 0 auto; }
+  .place-photos img { display:block; height:140px; max-width:230px; object-fit:cover; border:4px double var(--frame); border-radius:4px; background:#0002; }
+  .place-photos figcaption, .review small { font:11px/1.4 Roboto, Arial, sans-serif; color:var(--muted); margin-top:3px; }
+  .place-photos a, .review a, .place-links a { color:inherit; }
+  .place-text { font-size:9px; line-height:1.8; }
+  .place-text p { margin:6px 0; }
+  .place-text .summary { font:13px/1.5 Roboto, Arial, sans-serif; }
+  .place-links { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+  .place-links a { font-size:8px; text-decoration:underline; padding:6px 2px; }
+  .review { border-top:2px dashed var(--frame); padding:8px 0; font:13px/1.5 Roboto, Arial, sans-serif; overflow-wrap:anywhere; }
+  .review img { width:22px; height:22px; border-radius:50%; vertical-align:middle; margin-right:6px; }
+  .gmaps-attrib { font:400 12px Roboto, Arial, sans-serif; color:#5e5e5e; margin-top:10px; }
+  body.dark .gmaps-attrib { color:#ffffff; }
   .player { width:36px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
   /* The pulse lives on an inner box: MapLibre positions the outer element with `transform`,
      so animating `transform` on the outer element would fight with it. */
@@ -204,7 +223,14 @@
 </div>
 
 <div class="box toast" id="toast" hidden role="status" aria-live="polite"></div>
-<div class="box dialog" id="dialog"><span id="msg">You are near MG ROAD.<br>Search, or tap a spot, then press GO!</span> <span class="arrow">▼</span></div>
+<div class="settings" id="placePanel" hidden>
+  <div class="box panel" role="dialog" aria-modal="true" aria-label="Place details">
+    <div class="panel-head"><span id="placeTitle">PLACE</span> <button type="button" data-close="placePanel" aria-label="Close place details">X</button></div>
+    <div id="placeBody"></div>
+  </div>
+</div>
+
+<div class="box dialog" id="dialog"><span id="msg">You are near MG ROAD.<br>Search, or tap a spot, then press GO!</span><button id="infoBtn" class="mini" type="button" hidden>INFO</button> <span class="arrow">▼</span></div>
 
 <script>
 // Your own key from Google Cloud Console (keep this file private).
@@ -276,6 +302,7 @@ function paintLegend() {
   $('themeName').textContent = 'COLORS: ' + t.name;
   R.applyTheme(pmap, t);
   R.setMode(pmap, routeMode);
+  drawGoogleRoute();
 }
 
 // ---------- settings ----------
@@ -507,7 +534,8 @@ function persistSaved() { store.set('mapsplus.saved', JSON.stringify(saved)); re
 function saveDest(type) {
   if (!dest) return;
   if (type !== 'favorite') saved = saved.filter((p) => p.type !== type);   // one HOME, one WORK
-  saved.push({ id: Date.now().toString(36), type, name: destName || type.toUpperCase(), lat: dest.lat, lng: dest.lng });
+  saved.push({ id: Date.now().toString(36), type, name: destName || type.toUpperCase(), lat: dest.lat, lng: dest.lng,
+               placeId: destPlaceId || undefined });
   persistSaved(); sfx('save'); toast(`SAVED AS ${type.toUpperCase()}!`);
 }
 function renderPlaces() {
@@ -522,7 +550,7 @@ function renderPlaces() {
       const t = document.createElement('div'); t.className = 'grow';
       t.innerHTML = `${esc(p.name)}<small>${esc(p.type.toUpperCase())}</small>`;
       const go = document.createElement('button'); go.type = 'button'; go.className = 'mini'; go.textContent = 'GO';
-      go.onclick = () => { $('placesPanel').hidden = true; setDestination({ lat: p.lat, lng: p.lng }, p.name); findRoute(); };
+      go.onclick = () => { $('placesPanel').hidden = true; setDestination({ lat: p.lat, lng: p.lng }, p.name, p.placeId); findRoute(); };
       const del = document.createElement('button'); del.type = 'button'; del.className = 'mini'; del.textContent = 'X';
       del.setAttribute('aria-label', 'Delete ' + p.name);
       del.onclick = () => { saved = saved.filter((x) => x.id !== p.id); persistSaved(); };
@@ -545,14 +573,126 @@ function describe(ll) {
        : kind ? { building: 'that BUILDING', park: 'the GRASS', water: 'the WATER', road: 'that ROAD' }[kind.layer.id]
        : 'that SPOT';
 }
-function setDestination(pos, name) {
+let destPlaceId = null;   // Google place ID of the target, when it's a real place (enables INFO)
+function setDestination(pos, name, placeId) {
   dest = { lat: pos.lat, lng: pos.lng };
   destName = name ? String(name).toUpperCase() : describe(dest);
+  destPlaceId = placeId || null;
   target.setLngLat([dest.lng, dest.lat]).addTo(pmap);
   flag.remove();
   faceToward(dest.lng);
   goBtn.disabled = false;
+  $('infoBtn').hidden = !destPlaceId;
   msg(`Go to ${esc(destName)}?<br>Press GO! (${R.MODES[modeIdx].label})`);
+  syncGoogleDest();
+}
+
+// ---------- your position, route and target on Google's own map (seen with PEEK GOOGLE) ----------
+let gMe = null, gDest = null, gRouteLines = [];
+function movePlayer(lng, lat) {
+  player.setLngLat([lng, lat]);
+  if (gMe) gMe.position = { lat, lng };
+}
+function syncGoogleDest() {
+  if (!gDest) return;
+  gDest.position = dest ? { lat: dest.lat, lng: dest.lng } : null;
+  gDest.map = dest ? gmap : null;
+}
+function drawGoogleRoute() {
+  gRouteLines.forEach((l) => l.setMap(null)); gRouteLines = [];
+  if (!gmap || !routeFeats.length) return;
+  const t = R.THEMES[themeIdx];
+  const line = (opts) => gRouteLines.push(new google.maps.Polyline({ map: gmap, clickable: false, ...opts }));
+  routeFeats.forEach((f) => {
+    const path = f.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+    const sp = f.properties.speed;
+    if (sp === 'WALK') {          // walking: a trail of dots, like the game map
+      line({ path, strokeOpacity: 0, zIndex: 3, icons: [{ icon: { path: google.maps.SymbolPath.CIRCLE, scale: 3.5,
+        fillColor: t.walk, fillOpacity: 1, strokeColor: t.casing, strokeWeight: 1.5 }, offset: '0', repeat: '14px' }] });
+      return;
+    }
+    const color = sp === 'TRANSIT' ? f.properties.color : sp === 'SLOW' ? t.slow : sp === 'TRAFFIC_JAM' ? t.jam : t.clear;
+    line({ path, strokeColor: t.casing, strokeWeight: 10, strokeOpacity: 0.9, zIndex: 1 });
+    line({ path, strokeColor: color, strokeWeight: 6, strokeOpacity: 1, zIndex: 2 });
+  });
+}
+
+// Tapping a real place on Google's map selects that place (and its name) instead of just the spot.
+async function selectGooglePlace(placeId, pos) {
+  setDestination(pos, null, placeId);                 // instant, with the pixel map's name
+  try {
+    placesLib = placesLib || await google.maps.importLibrary('places');
+    const place = new placesLib.Place({ id: placeId });
+    await place.fetchFields({ fields: ['displayName', 'location'] });   // name = "Place Details Pro"
+    if (destPlaceId === placeId) setDestination({ lat: place.location.lat(), lng: place.location.lng() }, place.displayName, placeId);
+  } catch (err) { console.warn('Place lookup failed:', err); }
+}
+
+// ---------- place card: photos, description, rating, hours, reviews ----------
+// Only loaded when you press INFO (these are Google's priciest fields). Kept for this session only,
+// so reopening the same place doesn't pay twice; Google doesn't allow storing this data longer.
+const placeCache = new Map();
+$('infoBtn').onclick = (e) => { e.stopPropagation(); openPlaceCard(destPlaceId); };
+async function openPlaceCard(placeId) {
+  if (!placeId) return;
+  $('placeTitle').textContent = 'PLACE';
+  $('placeBody').innerHTML = '<div class="empty">Loading photos and info...</div>';
+  $('placePanel').hidden = false;
+  try {
+    placesLib = placesLib || await google.maps.importLibrary('places');
+    let place = placeCache.get(placeId);
+    if (!place) {
+      place = new placesLib.Place({ id: placeId });
+      await place.fetchFields({ fields: ['displayName', 'formattedAddress', 'rating', 'userRatingCount',
+        'regularOpeningHours', 'editorialSummary', 'photos', 'reviews', 'websiteURI', 'nationalPhoneNumber', 'googleMapsURI'] });
+      placeCache.set(placeId, place);
+    }
+    renderPlaceCard(place);
+  } catch (err) {
+    console.warn('Place details failed:', err);
+    $('placeBody').innerHTML = `<div class="empty">Couldn't load this place. ${esc(String((err && err.message) || '').slice(0, 100))}</div>`;
+  }
+}
+function renderPlaceCard(p) {
+  const name = p.displayName || destName || 'PLACE';
+  $('placeTitle').textContent = name.toUpperCase().slice(0, 38);
+  const html = [];
+  const photos = (p.photos || []).slice(0, 4);          // each photo shown is billed, so at most 4
+  if (photos.length) {
+    html.push('<div class="place-photos">' + photos.map((ph) => {
+      const a = (ph.authorAttributions || [])[0];
+      const credit = a ? `Photo: ${a.uri ? `<a href="${esc(a.uri)}" target="_blank" rel="noopener">${esc(a.displayName)}</a>` : esc(a.displayName)}` : '';
+      return `<figure><img decoding="async" alt="Photo of ${esc(name)}" src="${esc(ph.getURI({ maxHeight: 280 }))}"><figcaption>${credit}</figcaption></figure>`;
+    }).join('') + '</div>');
+  }
+  const facts = [];
+  if (p.rating) facts.push(`★ ${p.rating.toFixed(1)}${p.userRatingCount ? ` · ${p.userRatingCount.toLocaleString('en-IN')} RATINGS` : ''}`);
+  const hours = p.regularOpeningHours && p.regularOpeningHours.weekdayDescriptions;
+  if (hours && hours.length) facts.push('TODAY: ' + hours[(new Date().getDay() + 6) % 7].replace(/^[^:]+:\s*/, ''));
+  if (p.formattedAddress) facts.push(p.formattedAddress);
+  html.push('<div class="place-text">' + facts.map((x) => `<p>${esc(x)}</p>`).join('')
+    + (p.editorialSummary ? `<p class="summary">${esc(p.editorialSummary)}</p>` : '') + '</div>');
+  const links = [];
+  if (p.nationalPhoneNumber) links.push(`<a href="tel:${esc(p.nationalPhoneNumber.replace(/\s/g, ''))}">CALL</a>`);
+  if (p.websiteURI) links.push(`<a href="${esc(p.websiteURI)}" target="_blank" rel="noopener">WEBSITE</a>`);
+  if (p.googleMapsURI) links.push(`<a href="${esc(p.googleMapsURI)}" target="_blank" rel="noopener">OPEN IN GOOGLE MAPS</a>`);
+  html.push(`<div class="place-links"><button type="button" class="mini" data-act="go">GO</button>`
+    + `<button type="button" class="mini" data-act="save">SAVE</button>${links.join('')}</div>`);
+  const reviews = (p.reviews || []).slice(0, 3);
+  if (reviews.length) {
+    html.push('<div class="section">MOST RELEVANT REVIEWS (GOOGLE ORDER)</div>' + reviews.map((r) => {
+      const a = r.authorAttribution || {};
+      const who = a.uri ? `<a href="${esc(a.uri)}" target="_blank" rel="noopener">${esc(a.displayName || 'Google user')}</a>` : esc(a.displayName || 'Google user');
+      const text = String(r.text || '');
+      return `<div class="review">${a.photoURI ? `<img src="${esc(a.photoURI)}" alt="">` : ''}<b>${who}</b> · ${'★'.repeat(Math.round(r.rating || 0))}`
+        + ` <small>${esc(r.relativePublishTimeDescription || '')}</small><br>${esc(text.length > 300 ? text.slice(0, 300) + '…' : text)}</div>`;
+    }).join(''));
+  }
+  if (!photos.length && !facts.length && !reviews.length && !p.editorialSummary) html.push('<div class="empty">Google has no photos or details for this spot.</div>');
+  html.push('<div class="gmaps-attrib">Google Maps</div>');
+  $('placeBody').innerHTML = html.join('');
+  $('placeBody').querySelector('[data-act="go"]').onclick = () => { $('placePanel').hidden = true; findRoute(); };
+  $('placeBody').querySelector('[data-act="save"]').onclick = () => saveDest('favorite');
 }
 
 // ---------- search (Google Places) ----------
@@ -608,7 +748,7 @@ async function choosePlace(prediction) {
     sessionToken = null;
     hideResults(); searchEl.value = ''; searchEl.blur();
     const pos = { lat: place.location.lat(), lng: place.location.lng() };
-    setDestination(pos, prediction.mainText ? prediction.mainText.text : prediction.text.text);
+    setDestination(pos, prediction.mainText ? prediction.mainText.text : prediction.text.text, prediction.placeId);
     if (gmap) gmap.panTo(pos);
   } catch (err) { console.warn(err); resultsNote('Could not open that place.'); }
 }
@@ -654,6 +794,7 @@ async function findRoute(opts = {}) {
   }
   routeFeats = feats; routeStops = r.stops; routeCoords = coords; routeMode = mode.id;
   R.setRoute(pmap, feats, routeStops);
+  drawGoogleRoute();
   paintLegend();                       // also switches the line style for this mode
   faceToward(coords[Math.min(6, coords.length - 1)][0]);
   target.remove();
@@ -699,11 +840,11 @@ previewBtn.onclick = () => {
   (function frame(now) {
     const t = Math.min(1, (now - t0) / dur), e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
     const p = Geo.atDistance(routeCoords, L * e);
-    player.setLngLat([p.lng, p.lat]); faceBearing(p.bearing);
+    movePlayer(p.lng, p.lat); faceBearing(p.bearing);
     if (t < 1) { requestAnimationFrame(frame); return; }
     sfx('arrive');
     setTimeout(() => {
-      player.setLngLat(home); previewing = false; previewBtn.disabled = false;
+      movePlayer(home.lng, home.lat); previewing = false; previewBtn.disabled = false;
       faceToward(routeCoords[Math.min(6, routeCoords.length - 1)][0]); showStep();
     }, 800);
   })(t0);
@@ -746,7 +887,7 @@ function onFix(p) {
   if (previewing) return;
   const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
   const acc = p.coords.accuracy || 999, t = p.timestamp || Date.now();
-  player.setLngLat([pos.lng, pos.lat]);
+  movePlayer(pos.lng, pos.lat);
   explore(pos);
   if (lastFix && acc < 50) {
     const d = Geo.dist(lastFix.pos, pos), dt = Math.max(1, (t - lastFix.t) / 1000);
@@ -891,10 +1032,24 @@ window.initMap = () => {
 
   // Taps on Google pick the destination.
   gmap.addListener('click', (e) => {
-    if (e.placeId) e.stop();            // Google's own info window would be hidden under the overlay anyway
     hideResults();
-    setDestination({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+    const pos = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+    if (e.placeId) {                    // a real Google place (shop, temple, park...): select that place
+      e.stop();                         // (we show our own place card instead of Google's popup)
+      selectGooglePlace(e.placeId, pos);
+      return;
+    }
+    setDestination(pos);
   });
+
+  // Your blue dot and the target pin on Google's own map (the route lines are drawn by drawGoogleRoute).
+  google.maps.importLibrary('marker').then(({ AdvancedMarkerElement }) => {
+    const dot = document.createElement('div'); dot.className = 'gme'; dot.title = 'You';
+    const me = here();
+    gMe = new AdvancedMarkerElement({ map: gmap, position: me, content: dot, zIndex: 1000, title: 'You' });
+    gDest = new AdvancedMarkerElement({ map: null, title: 'Target' });
+    syncGoogleDest(); drawGoogleRoute();
+  }).catch((err) => console.warn('Google markers unavailable:', err));
   // Dragging the map while navigating pauses "follow me"; FIND ME turns it back on.
   gmap.addListener('dragstart', () => { if (nav.active) nav.follow = false; });
 
@@ -916,7 +1071,7 @@ window.initMap = () => {
     navigator.geolocation.getCurrentPosition((p) => {
       const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
       gmap.panTo(pos);
-      player.setLngLat([pos.lng, pos.lat]);
+      movePlayer(pos.lng, pos.lat);
       explore(pos);
       msg('Found you!<br>Where do you want to go?');
     }, () => msg('Location was blocked.<br>Allow it in the browser.'), { enableHighAccuracy: true });
