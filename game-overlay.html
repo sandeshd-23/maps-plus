@@ -79,7 +79,15 @@
   .results small { display:block; font-size:7px; color:var(--muted); }
   .results .note { padding:8px 6px; font-size:8px; line-height:1.6; }
 
-  .legend { position:absolute; right:12px; top:var(--legend-top, 170px); z-index:5; padding:8px 10px; font-size:8px; line-height:2.2; }
+  .legend { position:absolute; right:12px; top:170px; z-index:5; padding:8px 10px; font-size:8px; line-height:2.2; }
+  /* Compass: the dial turns with the map; tap to point north (or, in drive mode, toggle heading-up / north-up). */
+  .compass { position:absolute; right:12px; top:120px; z-index:6; width:52px; height:52px; padding:0; cursor:pointer;
+             display:grid; place-items:center; border-radius:50%; background:var(--paper); border:4px double var(--frame);
+             box-shadow:3px 3px 0 #0006; }
+  .compass canvas { transition:transform .12s linear; }
+  .compass .mode-tag { position:absolute; bottom:-14px; left:50%; transform:translateX(-50%); font:7px 'Press Start 2P', monospace;
+                       color:var(--ink); background:var(--paper); border:2px solid var(--frame); border-radius:3px; padding:2px 3px; white-space:nowrap; }
+  .compass .mode-tag[hidden] { display:none; }
   .legend i { display:inline-block; width:22px; height:8px; margin-right:6px; vertical-align:middle; border:2px solid #202020; }
   .legend .theme-name { margin-top:2px; color:var(--muted); }
 
@@ -184,6 +192,25 @@
   .target { width:22px; height:22px; box-sizing:border-box; border:4px solid #e8502c; box-shadow:0 0 0 2px #202020, inset 0 0 0 2px #202020;
             animation:pulse .6s steps(2) infinite alternate; }
   @keyframes pulse { to { transform:scale(.7); } }
+  /* Phones: smaller buttons so the top bar takes fewer rows. */
+  @media (max-width: 600px) {
+    .hud { top:8px; left:8px; right:8px; gap:5px; }
+    .hud button { font-size:8px; padding:6px 7px; border-width:3px; }
+    .hud .title { font-size:9px; padding:4px 7px; }
+    #lvl { font-size:7px; }
+    .xpbar { width:62px; height:5px; margin-top:3px; }
+    .search { flex-basis:150px; }
+    .search input { font-size:8px; padding:7px 8px; border-width:3px; }
+    .hud #peek { padding-left:25px; }
+    .hud #peek::before { left:6px; width:14px; height:10px; margin-top:-5px; background-size:14px 10px; }
+    .dialog { left:8px; right:8px; font-size:9px; padding:9px 11px; line-height:1.8; }
+    .legend { right:8px; font-size:7px; padding:6px 8px; }
+    .compass { right:8px; width:44px; height:44px; border-width:3px; }
+    .drive-banner { left:8px; right:8px; top:8px; padding:9px 11px; }
+    .drive-banner .dist { font-size:12px; }
+    .drive-banner .text { font-size:14px; }
+    .drive-bar { left:8px; right:8px; }
+  }
 </style>
 </head>
 <body>
@@ -207,6 +234,9 @@
   <button id="peek" type="button" title="See the real Google map underneath">PEEK GOOGLE</button>
 </div>
 
+<button class="compass" id="compass" type="button" aria-label="Compass. Tap to point the map north.">
+  <span class="mode-tag" id="compassTag" hidden></span>
+</button>
 <div class="box legend" id="legend" hidden>
   <div><i id="legendSample"></i><span id="legendMode">CAR</span></div>
   <div id="trafficRows">
@@ -527,10 +557,17 @@ function renderSettings() {
 $('openSettings').onclick = () => openPanel('settings', renderSettings);
 
 // PEEK GOOGLE (main screen and Settings): fade the game map away to show Google's real map underneath.
+const phone = matchMedia('(max-width: 600px)');
+function peekLabel() {
+  const on = $('pmap').classList.contains('peek');
+  $('peek').textContent = phone.matches ? (on ? 'BACK' : 'PEEK') : (on ? 'BACK TO GAME' : 'PEEK GOOGLE');
+}
+phone.addEventListener('change', () => { peekLabel(); placeFloaters(); });
+peekLabel();
 function togglePeek() {
   const on = $('pmap').classList.toggle('peek');
   $('peek').classList.toggle('on', on);
-  $('peek').textContent = on ? 'BACK TO GAME' : 'PEEK GOOGLE';
+  $('peek').textContent = phone.matches ? (on ? 'BACK' : 'PEEK') : (on ? 'BACK TO GAME' : 'PEEK GOOGLE');
   $('peek').setAttribute('aria-pressed', on);
 }
 $('peek').onclick = togglePeek;
@@ -1097,7 +1134,7 @@ function navUpdate(pos, p, course) {
 // ---------- drive mode (CAR / BIKE navigation) ----------
 // Zoomed in, map turned so your direction points up, big next-turn banner, speed, ETA, spoken turns,
 // and the screen kept awake. Spoken turns use the phone's own voice (free, works offline).
-const drive = { active: false, voice: store.get('mapsplus.voice') || 'on', wake: null, heading: 0,
+const drive = { active: false, northUp: false, voice: store.get('mapsplus.voice') || 'on', wake: null, heading: 0,
                 stepEndAlong: [], total: 0, told: { far: -1, near: -1 }, tween: 0 };
 const isRoadMode = (m) => m === 'DRIVE' || m === 'TWO_WHEELER';
 const plain = (t) => String(t || '').replace(/\s*\n\s*/g, '. ');
@@ -1128,6 +1165,7 @@ function enterDrive() {
   drive.active = true; prepareDriveRoute();
   document.body.classList.add('driving');
   $('driveBanner').hidden = false; $('driveBar').hidden = false;
+  $('compassTag').textContent = drive.northUp ? 'N-UP' : 'H-UP'; $('compassTag').hidden = false; placeFloaters();
   setVoice(drive.voice); keepAwake(true); ensureGuard();
   if (gmap) gmap.moveCamera({ center: here(), zoom: 18.3 });
   const first = updateDriveUI(here(), null, true);       // silent: we say it all in one sentence below
@@ -1138,6 +1176,7 @@ function exitDrive() {
   drive.active = false; cancelAnimationFrame(drive.tween);
   document.body.classList.remove('driving');
   $('driveBanner').hidden = true; $('driveBar').hidden = true;
+  $('compassTag').hidden = true; placeFloaters();
   keepAwake(false); try { speechSynthesis.cancel(); } catch (_) {}
   if (gmap) gmap.moveCamera({ heading: 0, zoom: Math.min(gmap.getZoom(), 17) });
 }
@@ -1175,6 +1214,7 @@ function updateDriveUI(pos, p, silent) {
 // Glide the camera to you over ~1 s (GPS updates about once a second), turning the short way round.
 function driveCamera(pos, heading) {
   if (!gmap || !nav.follow) return;
+  if (drive.northUp) heading = 0;
   cancelAnimationFrame(drive.tween);
   const c0 = gmap.getCenter(), h0 = gmap.getHeading() || 0, t0 = performance.now();
   const dh = ((heading - h0 + 540) % 360) - 180, from = { lat: c0.lat(), lng: c0.lng() };
@@ -1216,6 +1256,68 @@ window.addEventListener('popstate', () => {
   if (hasCancelable()) ensureGuard();
 });
 
+// ---------- compass ----------
+// Original pixel-art dial (red needle = north). It turns with the map, so the red tip always points north.
+const compassDial = (() => {
+  const S = 22, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'), mid = S / 2;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const d = Math.hypot(x + 0.5 - mid, y + 0.5 - mid);
+    if (d <= 10.5 && d > 9.2) { g.fillStyle = '#303040'; g.fillRect(x, y, 1, 1); }          // rim
+    else if (d <= 9.2 && d > 8.2) { g.fillStyle = '#c8c0a8'; g.fillRect(x, y, 1, 1); }      // bezel
+  }
+  // tick marks at E, S, W
+  g.fillStyle = '#303040'; g.fillRect(mid + 6, mid - 1, 2, 2); g.fillRect(mid - 1, mid + 6, 2, 2); g.fillRect(mid - 8, mid - 1, 2, 2);
+  // needle: red north half, grey south half
+  for (let k = 0; k < 7; k++) {
+    const w = Math.max(1, Math.round(3 - k * 0.4));
+    g.fillStyle = '#e8302c'; g.fillRect(mid - w / 2, mid - 1 - k, w, 1);
+    g.fillStyle = '#8a8f9e'; g.fillRect(mid - w / 2, mid + k, w, 1);
+  }
+  g.fillStyle = '#202020'; g.fillRect(mid - 1, mid - 1, 2, 2);                             // pivot
+  // "N" above the needle
+  g.fillStyle = '#e8302c';
+  [[0, 0], [0, 1], [0, 2], [0, 3], [1, 1], [2, 2], [3, 0], [3, 1], [3, 2], [3, 3]].forEach(([x, y]) => g.fillRect(mid - 2 + x, 1 + y, 1, 1));
+  const out = Crisp.canvas(c, 1.6);
+  out.setAttribute('aria-hidden', 'true');
+  return out;
+})();
+$('compass').prepend(compassDial);
+let mapBearing = 0;
+function setCompass(bearing) {
+  mapBearing = bearing;
+  compassDial.style.transform = `rotate(${-bearing}deg)`;
+}
+$('compass').onclick = () => {
+  if (!gmap) return;
+  if (drive.active) {                                  // drive mode: switch heading-up <-> north-up
+    drive.northUp = !drive.northUp;
+    $('compassTag').textContent = drive.northUp ? 'N-UP' : 'H-UP'; $('compassTag').hidden = false;
+    driveCamera(here(), drive.heading);
+    return;
+  }
+  // Turn back to north smoothly.
+  cancelAnimationFrame(compassTween);
+  const h0 = gmap.getHeading() || 0, dh = ((0 - h0 + 540) % 360) - 180, t0 = performance.now();
+  (function step(now) {
+    const t = Math.min(1, (now - t0) / 400);
+    gmap.moveCamera({ heading: (h0 + dh * t + 360) % 360 });
+    if (t < 1) compassTween = requestAnimationFrame(step);
+  })(t0);
+};
+let compassTween = 0;
+
+// Keep the compass and the route legend just below the top bar (or the drive banner), however tall it is.
+function placeFloaters() {
+  const top = document.body.classList.contains('driving') ? $('driveBanner') : document.querySelector('.hud');
+  const y = Math.round(top.getBoundingClientRect().bottom) + 10;
+  $('compass').style.top = y + 'px';
+  $('legend').style.top = (y + $('compass').offsetHeight + 14) + 'px';
+}
+new ResizeObserver(placeFloaters).observe(document.querySelector('.hud'));
+new ResizeObserver(placeFloaters).observe($('driveBanner'));
+addEventListener('resize', placeFloaters);
+
 // ---------- weather ----------
 let rain = null, toldWeather = false;
 async function checkWeather() {
@@ -1245,7 +1347,7 @@ window.initMap = () => {
     mapId: 'DEMO_MAP_ID',               // vector map: smooth fractional zoom keeps the overlay aligned
     renderingType: google.maps.RenderingType.VECTOR,   // ask for vector explicitly (raster can't sync per frame)
     isFractionalZoomEnabled: true,
-    headingInteractionEnabled: false, tiltInteractionEnabled: false,
+    headingInteractionEnabled: true, tiltInteractionEnabled: false,   // twist to rotate (the pixel map follows exactly)
     disableDefaultUI: true, gestureHandling: 'greedy', keyboardShortcuts: false,
     // Google's own map is mostly hidden, but shows through in TRAFFIC view; match the dark setting at load.
     colorScheme: google.maps.ColorScheme ? (isDark() ? google.maps.ColorScheme.DARK : google.maps.ColorScheme.LIGHT) : undefined,
@@ -1261,6 +1363,7 @@ window.initMap = () => {
     if (key === last) return;
     last = key;
     pmap.jumpTo({ center: [lng, lat], zoom, bearing });
+    setCompass(bearing);
     try { pmap.redraw(); } catch (_) { /* style still loading; MapLibre paints on its own */ }
   }
   // Simple path: read Google's camera. Google zoom uses 256px tiles and MapLibre uses 512px tiles,
