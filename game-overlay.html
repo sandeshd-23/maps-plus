@@ -572,6 +572,7 @@ function togglePeek() {
   $('peek').classList.toggle('on', on);
   $('peek').textContent = phone.matches ? (on ? 'BACK' : 'PEEK') : (on ? 'BACK TO GAME' : 'PEEK GOOGLE');
   $('peek').setAttribute('aria-pressed', on);
+  if (on) ensureGuard();
 }
 $('peek').onclick = togglePeek;
 // Show / hide INSTALL APP as soon as the browser says installing is possible.
@@ -864,7 +865,7 @@ document.addEventListener('keydown', (e) => {
 let placesLib = null, sessionToken = null, searchTimer = 0, searchSeq = 0;
 const resultsEl = $('results'), searchEl = $('search');
 function hideResults() { resultsEl.hidden = true; resultsEl.replaceChildren(); }
-function resultsNote(text) { resultsEl.innerHTML = `<div class="note">${esc(text)}</div>`; resultsEl.hidden = false; }
+function resultsNote(text) { resultsEl.innerHTML = `<div class="note">${esc(text)}</div>`; resultsEl.hidden = false; ensureGuard(); }
 searchEl.addEventListener('input', () => {
   clearTimeout(searchTimer);
   const q = searchEl.value.trim();
@@ -893,7 +894,7 @@ async function runSearch(q) {
       b.onclick = () => choosePlace(p);
       return b;
     }));
-    resultsEl.hidden = false;
+    resultsEl.hidden = false; ensureGuard();
   } catch (err) {
     console.warn('Search error:', err);
     const m = String(err && err.message || '');
@@ -1253,7 +1254,8 @@ $('driveCenter').onclick = () => { nav.follow = true; driveCamera(here(), drive.
 $('driveVoiceBtn').onclick = () => setVoice(drive.voice === 'on' ? 'off' : 'on');
 
 // ---------- back gesture / back button ----------
-// Instead of leaving the app, BACK closes what's on top: photo viewer > menus/panels > navigation > route.
+// Instead of leaving the app, BACK closes what's on top:
+// photo viewer > mode menu > search results > panels > PEEK > navigation (and drive mode) > route.
 function clearRoute() {
   if (nav.active) stopNav();
   route = null; routeFeats = []; routeStops = []; routeCoords = []; steps = []; stepIdx = -1; summary = '';
@@ -1264,8 +1266,9 @@ function clearRoute() {
   drawGoogleRoute(); syncGoogleDest();
   msg('Route cleared.<br>Search, or tap a spot, then press GO!');
 }
-const hasCancelable = () => !$('lightbox').hidden || !$('modeMenu').hidden || drive.active || nav.active || !!dest
-  || [...document.querySelectorAll('.settings')].some((p) => !p.hidden);
+const peeking = () => $('pmap').classList.contains('peek');
+const hasCancelable = () => !$('lightbox').hidden || !$('modeMenu').hidden || !resultsEl.hidden || peeking()
+  || drive.active || nav.active || !!dest || [...document.querySelectorAll('.settings')].some((p) => !p.hidden);
 function ensureGuard() {
   try { if (!(history.state && history.state.mapsplus)) history.pushState({ mapsplus: 1 }, ''); } catch (_) {}
 }
@@ -1273,9 +1276,13 @@ window.addEventListener('popstate', () => {
   const panels = [...document.querySelectorAll('.settings')].filter((p) => !p.hidden);
   if (!$('lightbox').hidden) closeLightbox();
   else if (!$('modeMenu').hidden) $('modeMenu').hidden = true;
+  else if (!resultsEl.hidden) { hideResults(); searchEl.blur(); }
   else if (panels.length) panels.forEach((p) => { p.hidden = true; });
+  else if (peeking()) togglePeek();
   else if (nav.active) stopNav('Navigation stopped.<br>Back again to clear the route.');
   else if (dest) clearRoute();
+  // Nothing was open (it was closed with its own button): in the app, BACK then leaves, like any app.
+  else if (window.Native && Native.isApp) { Native.minimize(); return; }
   if (hasCancelable()) ensureGuard();
 });
 

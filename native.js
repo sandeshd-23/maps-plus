@@ -14,6 +14,8 @@
  *   Native.keepAwake(on)
  *   Native.openSettings()              -> the app's Android settings page (permissions, battery)
  *   Native.showOnLockScreen(on)        -> show the app over the lock screen (on while navigating)
+ *   Native.minimize()                  -> send the app to the background
+ * Android BACK (button or edge swipe) acts like the browser's back button (see below).
  * Nothing here throws.
  */
 (function () {
@@ -62,6 +64,18 @@
     } catch (e) { return Promise.resolve(null); }
   }
 
+  // Android back button / swipe-from-the-edge: same as the browser's back. The page keeps a history entry
+  // while something can be closed (route, navigation, panels...), so BACK closes that first. With nothing
+  // left to close, Maps+ goes to the background like Google Maps instead of quitting.
+  if (isApp) {
+    try {
+      cap.nativeCallback('App', 'addListener', { eventName: 'backButton' }, (data) => {
+        if (data && data.canGoBack) history.back();
+        else call('App', 'minimizeApp');
+      });
+    } catch (_) {}
+  }
+
   window.Native = {
     isApp,
     watch,
@@ -74,6 +88,7 @@
     stopSpeaking() { return call('TextToSpeech', 'stop'); },
     keepAwake(on) { return call('KeepAwake', on ? 'keepAwake' : 'allowSleep'); },
     openSettings() { return call('BackgroundGeolocation', 'openSettings'); },
+    minimize() { return call('App', 'minimizeApp'); },     // to the background (not closed), like Google Maps
     // While navigating, pressing the power button shows the map over the lock screen (like Google Maps).
     // The phone stays locked: leaving Maps+ still needs your PIN/fingerprint.
     showOnLockScreen(on) { return call('LockScreen', 'set', { on: !!on }); },
