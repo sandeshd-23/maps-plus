@@ -13,6 +13,7 @@
  *   Native.speak(text, lang) / Native.stopSpeaking()
  *   Native.keepAwake(on)
  *   Native.openSettings()              -> the app's Android settings page (permissions, battery)
+ *   Native.showOnLockScreen(on)        -> show the app over the lock screen (on while navigating)
  * Nothing here throws.
  */
 (function () {
@@ -73,5 +74,8 @@
     stopSpeaking() { return call('TextToSpeech', 'stop'); },
     keepAwake(on) { return call('KeepAwake', on ? 'keepAwake' : 'allowSleep'); },
     openSettings() { return call('BackgroundGeolocation', 'openSettings'); },
+    // While navigating, pressing the power button shows the map over the lock screen (like Google Maps).
+    // The phone stays locked: leaving Maps+ still needs your PIN/fingerprint.
+    showOnLockScreen(on) { return call('LockScreen', 'set', { on: !!on }); },
   };
 })();

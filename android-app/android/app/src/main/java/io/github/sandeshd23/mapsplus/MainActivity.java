@@ -13,6 +13,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(LockScreenPlugin.class);   // our own small plugin; must be registered before super.onCreate
         super.onCreate(savedInstanceState);
         // Android 13+: ask once to show notifications, so the "Maps+ is navigating" notification
         // (shown while navigating with the screen off) is visible. Navigation still works if refused.

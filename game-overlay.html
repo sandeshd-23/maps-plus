@@ -226,7 +226,7 @@
   </div>
   <button id="openSettings" type="button">SETTINGS</button>
   <button id="locate" type="button">FIND ME</button>
-  <button id="mode" type="button">CAR</button>
+  <button id="mode" type="button">BIKE</button>
   <button id="go" type="button" disabled>GO!</button>
   <button id="start" type="button" disabled>START</button>
   <button id="preview" type="button" disabled>PREVIEW</button>
@@ -315,12 +315,22 @@
   </div>
 </div>
 
-<div class="box dialog" id="dialog"><span id="msg">You are near MG ROAD.<br>Search, or tap a spot, then press GO!</span><button id="infoBtn" class="mini" type="button" hidden>INFO</button> <span class="arrow">▼</span></div>
+<div class="box dialog" id="dialog"><span id="msg">Finding you...<br>Search, or tap a spot, then press GO!</span><button id="infoBtn" class="mini" type="button" hidden>INFO</button> <span class="arrow">▼</span></div>
 
 <script>
 // Your own key from Google Cloud Console (keep this file private).
 const GOOGLE_MAPS_API_KEY = 'AIzaSyDNY2b6O13KsRTY8e2yMwRowwHE6v8Yh5s';
-const START = { lat: 12.9756, lng: 77.6066 };   // MG Road, Bengaluru
+// Open where you were last seen (kept only on this device), else MG Road; then GPS moves you to where you are now.
+const START = (() => {
+  try { const p = JSON.parse(localStorage.getItem('mapsplus.lastpos')); if (p && isFinite(p.lat) && isFinite(p.lng)) return p; } catch (_) {}
+  return { lat: 12.9756, lng: 77.6066 };   // MG Road, Bengaluru
+})();
+let lastSaved = 0;
+function rememberPos(pos, force) {
+  if (!force && Date.now() - lastSaved < 30000) return;
+  lastSaved = Date.now();
+  try { localStorage.setItem('mapsplus.lastpos', JSON.stringify({ lat: +pos.lat.toFixed(5), lng: +pos.lng.toFixed(5) })); } catch (_) {}
+}
 
 const $ = (id) => document.getElementById(id);
 const msg = (html) => { $('msg').innerHTML = html; };
@@ -372,10 +382,10 @@ const flag = new maplibregl.Marker({ element: R.makeFlag(), anchor: 'bottom-left
 
 // ---------- route state ----------
 let themeIdx = Math.max(0, R.THEMES.findIndex(t => t.id === store.get('mapsplus.theme')));
-let modeIdx = 0;
+let modeIdx = Math.max(0, R.MODES.findIndex((m) => m.id === 'TWO_WHEELER'));   // BIKE by default
 let dest = null, destName = '', route = null, steps = [], stepIdx = -1, summary = '';
 let routeFeats = [], routeStops = [], routeCoords = [];
-let routeMode = 'DRIVE';   // the travel mode the current route was drawn for (sets its line style)
+let routeMode = 'TWO_WHEELER';   // the travel mode the current route was drawn for (sets its line style)
 const goBtn = $('go'), startBtn = $('start'), previewBtn = $('preview'), dialog = $('dialog');
 
 function paintLegend() {
@@ -1075,11 +1085,13 @@ function startNav() {
   startBtn.textContent = 'STOP'; startBtn.classList.add('on');
   Progress.tripStarted();
   showNavStep(); updateWatch();
+  if (window.Native && Native.isApp) Native.showOnLockScreen(true);   // power button: the map shows over the lock screen
   if (isRoadMode(routeMode)) enterDrive();     // CAR / BIKE: full driving view
 }
 function stopNav(text) {
   if (drive.active) exitDrive();
   nav.active = false; startBtn.textContent = 'START'; startBtn.classList.remove('on');
+  if (window.Native && Native.isApp) Native.showOnLockScreen(false);
   updateWatch(); if (text) msg(text);
 }
 startBtn.onclick = () => (nav.active ? stopNav('Navigation stopped.<br>Press START to resume.') : startNav());
@@ -1089,7 +1101,7 @@ function onFix(p) {
   const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
   const acc = p.coords.accuracy || 999, t = p.timestamp || Date.now();
   movePlayer(pos.lng, pos.lat);
-  explore(pos);
+  explore(pos); rememberPos(pos);
   // Direction of travel: the GPS course when moving, else the bearing from the last good fix.
   let course = p.coords.heading != null && !isNaN(p.coords.heading) && (p.coords.speed || 0) > 1 ? p.coords.heading : null;
   if (lastFix && acc < 50) {
@@ -1468,18 +1480,25 @@ window.initMap = () => {
     else showStep();
   };
 
-  $('locate').onclick = () => {
-    if (!navigator.geolocation) { msg('This device cannot<br>share its location.'); return; }
+  // FIND ME, and once at startup (startup jumps straight there and stays quiet if location is off).
+  function locateMe(startup) {
+    if (!navigator.geolocation) { if (!startup) msg('This device cannot<br>share its location.'); else msg('Search, or tap a spot,<br>then press GO!'); return; }
     nav.follow = true;
-    msg('Looking for you...');
+    if (!startup) msg('Looking for you...');
     navigator.geolocation.getCurrentPosition((p) => {
+      if (startup && (dest || nav.active)) return;      // you already started doing something
       const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
-      gmap.panTo(pos);
+      if (startup) gmap.moveCamera({ center: pos }); else gmap.panTo(pos);
       movePlayer(pos.lng, pos.lat);
-      explore(pos);
+      explore(pos); rememberPos(pos, true);
       msg('Found you!<br>Where do you want to go?');
-    }, () => msg('Location was blocked.<br>Allow it in the browser.'), { enableHighAccuracy: true });
-  };
+    }, () => {
+      if (startup) { if (!dest) msg('Search, or tap a spot,<br>then press GO!'); }
+      else msg((window.Native && Native.isApp) ? 'Location is off.<br>Allow it in PHONE SETTINGS.' : 'Location was blocked.<br>Allow it in the browser.');
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  }
+  $('locate').onclick = () => locateMe(false);
+  locateMe(true);
 
   setTimeout(checkWeather, 1500);
 };
