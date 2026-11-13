@@ -31,6 +31,7 @@
 <script src="trips.js"></script>
 <script src="collection.js"></script>
 <script src="photos.js"></script>
+<script src="area-data.js"></script>
 <!-- Optional add-ons: the app works (with less flair) if any of these is missing. -->
 <script src="pixel-art.js" onerror="console.warn('pixel-art.js missing')"></script>
 <script src="sky.js" onerror="console.warn('sky.js missing')"></script>
@@ -1859,27 +1860,74 @@ function entryCanvas(icon, px) {
   c.style.cssText = `width:${Math.round(img.width * s)}px;height:${Math.round(img.height * s)}px;image-rendering:pixelated`;
   return c;
 }
-// Area name (neighbourhood / suburb) of a spot: the nearest place label the map has loaded.
+// Book areas: the big, well-known parts of Bengaluru. Every spot belongs to the nearest one, so Prithvi Layout,
+// ITPL and Kadugodi all count as WHITEFIELD. Outside the city: the nearest village / town name from the map.
+const BOOK_AREAS = [
+  ['WHITEFIELD', 12.975, 77.742], ['KR PURAM', 13.007, 77.696], ['MARATHAHALLI', 12.957, 77.701], ['VARTHUR', 12.938, 77.746],
+  ['BELLANDUR', 12.926, 77.676], ['SARJAPUR ROAD', 12.906, 77.700], ['HSR LAYOUT', 12.912, 77.647], ['KORAMANGALA', 12.935, 77.624],
+  ['BTM LAYOUT', 12.917, 77.610], ['BOMMANAHALLI', 12.900, 77.627], ['ELECTRONIC CITY', 12.845, 77.660],
+  ['BANNERGHATTA ROAD', 12.889, 77.597], ['JP NAGAR', 12.906, 77.586], ['JAYANAGAR', 12.930, 77.583], ['BANASHANKARI', 12.925, 77.547],
+  ['BASAVANAGUDI', 12.942, 77.574], ['UTTARAHALLI', 12.906, 77.537], ['KENGERI', 12.908, 77.483], ['RR NAGAR', 12.927, 77.516],
+  ['NAGARBHAVI', 12.960, 77.510], ['VIJAYANAGAR', 12.972, 77.533], ['RAJAJINAGAR', 12.991, 77.553], ['MALLESHWARAM', 13.004, 77.571],
+  ['YESHWANTHPUR', 13.028, 77.540], ['PEENYA', 13.029, 77.520], ['HEBBAL', 13.036, 77.597], ['YELAHANKA', 13.101, 77.596],
+  ['KALYAN NAGAR', 13.025, 77.640], ['THANISANDRA', 13.056, 77.633], ['BANASWADI', 13.010, 77.648], ['FRAZER TOWN', 12.998, 77.615],
+  ['SHIVAJINAGAR', 12.986, 77.606], ['MG ROAD', 12.975, 77.607], ['MAJESTIC', 12.977, 77.571], ['CITY MARKET', 12.963, 77.577],
+  ['SHANTHINAGAR', 12.952, 77.600], ['INDIRANAGAR', 12.972, 77.641], ['CV RAMAN NAGAR', 12.985, 77.663], ['HAL AIRPORT ROAD', 12.959, 77.667],
+  ['SAHAKAR NAGAR', 13.062, 77.586], ['JALAHALLI', 13.046, 77.548], ['MAHADEVAPURA', 12.991, 77.690], ['HOSKOTE ROAD', 13.040, 77.720],
+].map(([name, lat, lng]) => ({ name, lat, lng }));
+const AREA_MAX_M = 6000;
 let areaCache = { t: 0, list: [] };
-function areaPlaces() {
+function areaPlaces() {                               // village / town labels the map has loaded (outskirts)
   if (Date.now() - areaCache.t < 20000 && areaCache.list.length) return areaCache.list;
   const seen = new Set(), list = [];
   try {
     pmap.querySourceFeatures('omt', { sourceLayer: 'place' }).forEach((f) => {
       const p = f.properties;
-      if (!p.name || !['suburb', 'quarter', 'neighbourhood'].includes(p.class)) return;
+      if (!p.name || !['suburb', 'town', 'village'].includes(p.class)) return;
       const [lng, lat] = f.geometry.coordinates, k = p.name + lng.toFixed(3);
       if (seen.has(k)) return; seen.add(k);
-      list.push({ name: String(p.name_en || p.name).toUpperCase(), lng, lat, w: p.class === 'suburb' ? 1.4 : 1 });
+      list.push({ name: String(p.name_en || p.name).toUpperCase(), lng, lat });
     });
   } catch (_) {}
   areaCache = { t: Date.now(), list };
   return list;
 }
-function areaFor(pos, list = areaPlaces()) {
-  let best = 'BENGALURU', bestD = Infinity;
-  list.forEach((a) => { const d = Geo.dist(pos, a) / a.w; if (d < bestD) { bestD = d; best = a.name; } });
-  return best;
+function nearestOf(pos, list) {
+  let best = null, bestD = Infinity;
+  list.forEach((a) => { const d = Geo.dist(pos, a); if (d < bestD) { bestD = d; best = a; } });
+  return { area: best, d: bestD };
+}
+function areaFor(pos) {
+  const n = nearestOf(pos, BOOK_AREAS);
+  if (n.d <= AREA_MAX_M) return n.area.name;
+  const o = nearestOf(pos, areaPlaces());
+  return o.area && o.d <= 5000 ? o.area.name : 'OUTSKIRTS';     // only a village / town label that's really nearby
+}
+const areaCenter = (name) => BOOK_AREAS.find((a) => a.name === name) || null;
+// Every collectable place in a whole area, read straight from the map tiles (cached for 10 minutes).
+const areaStats = new Map();
+async function tileTemplate() {
+  const src = pmap.getSource('omt');
+  if (src && src.tiles && src.tiles[0]) return src.tiles[0];
+  const j = await (await fetch('https://tiles.openfreemap.org/planet')).json();
+  return j.tiles[0];
+}
+async function poisOfArea(area, me) {
+  const hit = areaStats.get(area);
+  if (hit && Date.now() - hit.t < 600000) return hit.pois;
+  const c = areaCenter(area) || me;
+  const d = await AreaData.load(c.lat, c.lng, 1, await tileTemplate());   // 3x3 tiles, ~7 km across
+  const seen = new Set(), pois = [];
+  d.pois.forEach((p) => {
+    const name = p.name_en || p['name:latin'] || p.name; if (!name) return;
+    const icon = iconKeyFor(p); if (!icon) return;
+    const chapter = Book.chapterFor(groupForKey(icon)); if (!chapter) return;
+    const key = `poi|${p.class}|${name}|${p.lng.toFixed(4)}|${p.lat.toFixed(4)}`;
+    if (seen.has(key)) return; seen.add(key);
+    pois.push({ key, name, icon, kind: icon, chapter, lng: p.lng, lat: p.lat });
+  });
+  areaStats.set(area, { t: Date.now(), pois });
+  return pois;
 }
 // Collectable places the map has loaded (one per place): food, shops, places, services.
 function loadedPois() {
@@ -2048,37 +2096,41 @@ function refreshCaughtStars() { const src = pmap.getSource('caught'); if (src) s
 let bookTab = 'all', bookView = 'gallery', bookEntry = null, bookLiveAt = null;
 const ARROWS = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
 const when = (t) => new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-// Open the book where you are: if the map is looking elsewhere, bring it to you first (so it loads your area).
 function openBook() {
   bookTab = 'all'; bookEntry = null;
-  const me = here(), c = gmap && gmap.getCenter();
-  if (c && Geo.dist(me, { lat: c.lat(), lng: c.lng() }) > 600) {
-    gmap.moveCamera({ center: me, zoom: Math.max(gmap.getZoom() || 16, 16) });
-    openPanel('bookPanel', () => { $('bookBody').innerHTML = '<div class="empty">Finding your area...</div>'; });
-    setTimeout(() => { if (!$('bookPanel').hidden) renderBook(); }, 1500);
-  } else openPanel('bookPanel', renderBook);
+  openPanel('bookPanel', renderBook);
 }
 $('openBook').onclick = openBook;
 $('catchFx').onclick = () => { clearTimeout(fxTimer); showNextFx(); };
 // The part that depends on where you are: refreshed as you move while the book is open.
-function renderBookLive() {
+// Counts cover the WHOLE area (e.g. all of Whitefield), read from the map tiles, not just what's on screen.
+let liveSeq = 0;
+async function renderBookLive() {
   const box = $('bookLive'); if (!box) return;
   const me = here(); bookLiveAt = me;
-  const pois = loadedPois(), places = areaPlaces(), per = {};
-  pois.forEach((c) => { const a = areaFor(c, places); (per[a] = per[a] || {})[c.chapter] = (per[a][c.chapter] || 0) + 1; });
-  Object.entries(per).forEach(([a, counts]) => Book.noteAreaTotals(a, counts));
-  const area = areaFor(me, places), totals = Book.areaTotals(area);
-  const mine = Book.entries().filter((e) => e.area === area);
+  const area = areaFor(me), seq = ++liveSeq;
+  if (!box.dataset.area || box.dataset.area !== area) {
+    box.dataset.area = area;
+    box.innerHTML = `<div class="section">YOU ARE IN ${esc(area)} <span class="live">● LIVE</span></div><div class="empty">Counting every place in ${esc(area)}...</div>`;
+  }
+  let pois = [];
+  try { pois = await poisOfArea(area, me); } catch (err) { console.warn('Area count failed:', err); }
+  if (seq !== liveSeq || !$('bookLive')) return;            // a newer update started, or the book closed
+  const inArea = pois.filter((c) => areaFor(c) === area);
+  const mine = Book.entries().filter((e) => areaFor(e) === area);
   const rows = Book.CHAPTERS.map((ch) => {
-    const got = mine.filter((e) => e.chapter === ch.id).length, tot = Math.max(totals[ch.id] || 0, got);
+    const got = mine.filter((e) => e.chapter === ch.id).length;
+    const tot = Math.max(inArea.filter((c) => c.chapter === ch.id).length, got);
     if (!tot) return '';
     return `<div class="prog"><span class="pl">${ch.label}</span><span class="pb"><i style="width:${Math.round(got / tot * 100)}%"></i></span><span class="pn">${got}/${tot}</span></div>`;
   }).join('');
   box.innerHTML = `<div class="section">YOU ARE IN ${esc(area)} <span class="live">● LIVE</span></div>`
-    + (rows || '<div class="empty">Zoom the map in around you to count the places here.</div>')
+    + `<div class="empty">${inArea.length} PLACES TO COLLECT IN ${esc(area)} · YOU HAVE ${mine.length}</div>`
+    + (rows || '<div class="empty">No map data for this area yet. Check your internet.</div>')
     + '<div class="section">NEARBY TO CATCH</div>';
-  const near = pois.filter((c) => !Book.has(c.key)).map((c) => ({ ...c, d: Geo.dist(me, c) }))
-    .filter((c) => c.d < 800).sort((a, b) => a.d - b.d).slice(0, 6);
+  const seen = new Set();
+  const near = [...pois, ...loadedPois()].filter((c) => !Book.has(c.key) && !seen.has(c.key) && seen.add(c.key))
+    .map((c) => ({ ...c, d: Geo.dist(me, c) })).filter((c) => c.d < 800).sort((x, y) => x.d - y.d).slice(0, 6);
   if (!near.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Nothing uncaught close by. Explore!'; box.appendChild(e); }
   near.forEach((c) => {
     const row = document.createElement('div'); row.className = 'row';

@@ -16,7 +16,7 @@
  */
 'use strict';
 
-const VERSION = 'v7';
+const VERSION = 'v8';
 const PREFIX = 'mapsplus-';
 const SHELL_CACHE = PREFIX + 'shell-' + VERSION;
 const CDN_CACHE = PREFIX + 'cdn-' + VERSION;
@@ -49,6 +49,7 @@ const PRECACHE = [
   'trips.js',
   'collection.js',
   'photos.js',
+  'area-data.js',
   'pixel-art.js',
   'sky.js',
   'sfx.js',
