@@ -8,6 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#22263a">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+<script src="native.js"></script>
 <script src="pwa.js"></script>
 <script>if (window.PWA) PWA.register();</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -549,7 +550,9 @@ function renderSettings() {
   const more = [choiceButton(peekOn ? 'BACK TO GAME' : 'PEEK GOOGLE', peekOn, () => {
     togglePeek(); renderSettings();
   }, null, 'SEE THE REAL MAP')];
-  if (window.PWA) more.push(choiceButton('INSTALL APP', false, async () => {
+  if (window.Native && Native.isApp) more.push(choiceButton('PHONE SETTINGS', false, () => Native.openSettings(),
+    null, 'LOCATION, BATTERY'));
+  else if (window.PWA) more.push(choiceButton('INSTALL APP', false, async () => {
     const r = await PWA.install(); if (r === 'accepted') toast('INSTALLED!<br>Find MAPS+ on your home screen'); renderSettings();
   }, null, PWA.canInstall ? 'ADD TO HOME SCREEN' : 'NOT AVAILABLE HERE', !PWA.canInstall));
   fill('moreActions', more);
@@ -1039,14 +1042,23 @@ previewBtn.onclick = () => {
 
 // ---------- live navigation + tracking (GPS) ----------
 const nav = { active: false, stepIdx: 0, offCount: 0, lastReroute: 0, follow: true };
-let watchId = null, lastFix = null;
+let watchId = null, watchKind = null, lastFix = null;
 const wantWatch = () => nav.active || settings.fog === 'on';
+// In the Android app, navigation uses the native GPS service, which keeps running with the screen off.
+// Everything else (and the website) uses the browser's own location.
 function updateWatch() {
-  if (!navigator.geolocation) return;
-  if (wantWatch() && watchId === null) {
+  const want = !wantWatch() ? null : nav.active && window.Native && Native.isApp ? 'native' : navigator.geolocation ? 'web' : null;
+  if (want === watchKind) return;
+  if (watchKind === 'web') navigator.geolocation.clearWatch(watchId);
+  if (watchKind === 'native') Native.clearWatch(watchId);
+  watchId = null; watchKind = want;
+  if (want === null) { lastFix = null; return; }
+  if (want === 'web') {
     watchId = navigator.geolocation.watchPosition(onFix, onFixError, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
-  } else if (!wantWatch() && watchId !== null) {
-    navigator.geolocation.clearWatch(watchId); watchId = null; lastFix = null;
+  } else {
+    Native.watch(onFix, (e) => onFixError({ code: e && e.code === 'NOT_AUTHORIZED' ? 1 : 2 })).then((id) => {
+      if (watchKind === 'native' && watchId === null) watchId = id; else Native.clearWatch(id);
+    });
   }
 }
 function onFixError(e) {
@@ -1141,13 +1153,21 @@ const plain = (t) => String(t || '').replace(/\s*\n\s*/g, '. ');
 function setVoice(v) {
   drive.voice = v; store.set('mapsplus.voice', v);
   $('driveVoiceBtn').textContent = v === 'on' ? 'VOICE ON' : 'VOICE OFF';
-  if (v !== 'on') { try { speechSynthesis.cancel(); } catch (_) {} }
+  if (v !== 'on') stopSpeaking();
 }
+const inApp = () => !!(window.Native && Native.isApp);
 function speak(text) {
-  if (drive.voice !== 'on' || !('speechSynthesis' in window)) return;
+  if (drive.voice !== 'on') return;
+  if (inApp()) { Native.speak(text, 'en-IN'); return; }     // the phone's voice; works with the screen off
+  if (!('speechSynthesis' in window)) return;
   try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'en-IN'; speechSynthesis.speak(u); } catch (_) {}
 }
+function stopSpeaking() {
+  if (inApp()) Native.stopSpeaking();
+  try { speechSynthesis.cancel(); } catch (_) {}
+}
 async function keepAwake(on) {
+  if (inApp()) { Native.keepAwake(on); return; }
   try {
     if (on && 'wakeLock' in navigator && !drive.wake) {
       drive.wake = await navigator.wakeLock.request('screen');
@@ -1177,7 +1197,7 @@ function exitDrive() {
   document.body.classList.remove('driving');
   $('driveBanner').hidden = true; $('driveBar').hidden = true;
   $('compassTag').hidden = true; placeFloaters();
-  keepAwake(false); try { speechSynthesis.cancel(); } catch (_) {}
+  keepAwake(false); stopSpeaking();
   if (gmap) gmap.moveCamera({ heading: 0, zoom: Math.min(gmap.getZoom(), 17) });
 }
 function turnIcon(t) {

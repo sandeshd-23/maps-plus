@@ -55,6 +55,13 @@
       regPromise = new Promise((resolve) => {
         try {
           if (!('serviceWorker' in navigator) || !window.isSecureContext) { resolve(null); return; }
+          // Inside the Android app the page must always come fresh from the site (the app adds its native
+          // bridge to it on the way in), so no service worker there; remove any left over.
+          if (window.Native && window.Native.isApp) {
+            navigator.serviceWorker.getRegistrations()
+              .then((rs) => Promise.all(rs.map((r) => r.unregister()))).catch(() => {});
+            resolve(null); return;
+          }
           const go = () => {
             try {
               navigator.serviceWorker.register('sw.js', { scope: './' }).then(resolve, (err) => {

@@ -1,0 +1,21 @@
+{
+  "appId": "io.github.sandeshd23.mapsplus",
+  "appName": "Maps+",
+  "webDir": "www",
+  "server": {
+    "url": "https://sandeshd-23.github.io/maps-plus/game-overlay.html",
+    "allowNavigation": [
+      "sandeshd-23.github.io"
+    ],
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "useLegacyBridge": true,
+    "appendUserAgent": "MapsPlusApp"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "native"
+    }
+  }
+}

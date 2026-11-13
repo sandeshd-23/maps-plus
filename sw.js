@@ -16,7 +16,7 @@
  */
 'use strict';
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const PREFIX = 'mapsplus-';
 const SHELL_CACHE = PREFIX + 'shell-' + VERSION;
 const CDN_CACHE = PREFIX + 'cdn-' + VERSION;
@@ -32,6 +32,7 @@ const START_PAGE = 'game-overlay.html';
 // App shell, relative to this file. Each entry is cached on its own; a missing file never fails the install.
 const PRECACHE = [
   START_PAGE,
+  'native.js',
   'crisp.js',
   'pixel-style.js',
   'trees.js',

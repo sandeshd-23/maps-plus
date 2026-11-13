@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Maps+</string>
+    <string name="title_activity_main">Maps+</string>
+    <string name="package_name">io.github.sandeshd23.mapsplus</string>
+    <string name="custom_url_scheme">io.github.sandeshd23.mapsplus</string>
+    <!-- Navigation notification (BackgroundGeolocation plugin) -->
+    <string name="capacitor_background_geolocation_notification_channel_name">Navigation</string>
+    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_tracking</string>
+    <string name="capacitor_background_geolocation_notification_color">#e8302c</string>
+</resources>
