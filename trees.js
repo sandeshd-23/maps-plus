@@ -64,6 +64,7 @@
       if (!map.getSource('trees')) map.addSource('trees', { type: 'geojson', data: EMPTY });
       if (map.getLayer('trees')) map.removeLayer('trees');
       const list = ids();
+      if (!list.length) return;                           // no tree sprites yet (theme still loading)
       const iconImage = list.length > 1
         ? ['match', ['get', 'v'], ...list.slice(0, -1).flatMap((id, k) => [k, id]), list[list.length - 1]]
         : list[0];

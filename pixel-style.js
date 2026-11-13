@@ -37,10 +37,7 @@
   };
 
   // Zoom interpolation must be the outermost expression, so per-class widths go inside each stop.
-  const byClass = (big, mid, small, k) => ['match', ['get', 'class'],
-    ['motorway', 'trunk', 'primary'], big * k, ['secondary', 'tertiary'], mid * k, small * k];
-  const roadWidth = (big, mid, small) => ['interpolate', ['linear'], ['zoom'],
-    13, byClass(big, mid, small, 0.4), 16, byClass(big, mid, small, 1), 19, byClass(big, mid, small, 3)];
+  const S = window.MapScale;   // road widths, fading and labels per zoom (map-scale.js)
   const ROADS = ['motorway','trunk','primary','secondary','tertiary','minor','service'];
   const FONT = ['Noto Sans Bold'];
 
@@ -61,19 +58,19 @@
         filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': 'grass' } },
       { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-pattern': 'water' } },
       { id: 'water-edge', type: 'line', source: 'omt', 'source-layer': 'water',
-        paint: { 'line-color': '#2c5d8f', 'line-width': 2 } },
-      { id: 'road-casing', type: 'line', source: 'omt', 'source-layer': 'transportation',
+        paint: { 'line-color': '#2c5d8f', 'line-width': S.waterEdge() } },
+      { id: 'road-casing', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 12,
         filter: ['in', ['get', 'class'], ['literal', ROADS]],
         layout: { 'line-cap': 'square', 'line-join': 'miter' },
-        paint: { 'line-color': '#7a5a36', 'line-width': roadWidth(14, 11, 8) } },
+        paint: { 'line-color': '#7a5a36', 'line-width': S.casingWidth(), 'line-opacity': S.casingOpacity() } },
       { id: 'road', type: 'line', source: 'omt', 'source-layer': 'transportation',
         filter: ['in', ['get', 'class'], ['literal', ROADS]],
         layout: { 'line-cap': 'square', 'line-join': 'miter' },
         paint: { 'line-color': ['match', ['get','class'], ['motorway','trunk','primary'], '#f7c860', '#f2dc9a'],
-          'line-width': roadWidth(10, 8, 5.5) } },
-      { id: 'path', type: 'line', source: 'omt', 'source-layer': 'transportation',
+          'line-width': S.roadWidth(), 'line-opacity': S.roadOpacity() } },
+      { id: 'path', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 14,
         filter: ['in', ['get', 'class'], ['literal', ['path','track']]],
-        paint: { 'line-color': '#c99a5b', 'line-width': 2.5, 'line-dasharray': [2, 1] } },
+        paint: { 'line-color': '#c99a5b', 'line-width': S.pathWidth(), 'line-dasharray': [2, 1] } },
       // Borders and shadows fade in only when zoomed close; zoomed out they'd swallow small roofs (all black).
       { id: 'building-shadow', type: 'fill', source: 'omt', 'source-layer': 'building',
         paint: { 'fill-color': ['interpolate', ['linear'], ['zoom'], 15.3, 'rgba(0,0,0,0)', 16.8, 'rgba(0,0,0,0.33)'],
@@ -81,21 +78,8 @@
       { id: 'building', type: 'fill', source: 'omt', 'source-layer': 'building',
         paint: { 'fill-color': '#d8644a',   // one solid roof color
           'fill-outline-color': ['interpolate', ['linear'], ['zoom'], 15.3, 'rgba(42,32,48,0)', 16.8, '#2a2030'] } },
-      { id: 'water-name', type: 'symbol', source: 'omt', 'source-layer': 'water_name',
-        layout: { 'text-field': ['upcase', ['get','name']], 'text-font': FONT, 'text-size': 15 },
-        paint: { 'text-color': '#ffffff', 'text-halo-color': '#1d3c66', 'text-halo-width': 2 } },
-      { id: 'street-name', type: 'symbol', source: 'omt', 'source-layer': 'transportation_name',
-        filter: ['in', ['get','class'], ['literal', ['primary','secondary','tertiary','minor']]],
-        layout: { 'symbol-placement': 'line', 'text-field': ['upcase', ['get','name']],
-          'text-font': FONT, 'text-size': 13, 'text-letter-spacing': 0.05 },
-        paint: { 'text-color': '#3a2a18', 'text-halo-color': '#f2dc9a', 'text-halo-width': 1.5 } },
-      { id: 'park-name', type: 'symbol', source: 'omt', 'source-layer': 'poi',
-        filter: ['==', ['get','class'], 'park'],
-        layout: { 'text-field': ['upcase', ['get','name']], 'text-font': FONT, 'text-size': 15 },
-        paint: { 'text-color': '#ffffff', 'text-halo-color': '#225a24', 'text-halo-width': 2 } },
-      { id: 'place-name', type: 'symbol', source: 'omt', 'source-layer': 'place',
-        layout: { 'text-field': ['upcase', ['get','name']], 'text-font': FONT, 'text-size': 18 },
-        paint: { 'text-color': '#ffffff', 'text-halo-color': '#202030', 'text-halo-width': 2.5 } },
+      ...S.labels({ font: FONT, label: '#ffffff', labelHalo: '#202030', streetLabel: '#3a2a18', streetHalo: '#f2dc9a',
+                    waterHalo: '#1d3c66', parkHalo: '#225a24', letterSpacing: 0.05 }),
     ],
   };
 

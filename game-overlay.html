@@ -16,6 +16,7 @@
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="crisp.js"></script>
+<script src="map-scale.js"></script>
 <script src="pixel-style.js"></script>
 <script src="trees.js"></script>
 <script src="kenney-styles.js"></script>
@@ -80,7 +81,7 @@
   .results small { display:block; font-size:7px; color:var(--muted); }
   .results .note { padding:8px 6px; font-size:8px; line-height:1.6; }
 
-  .legend { position:absolute; right:12px; top:170px; z-index:5; padding:8px 10px; font-size:8px; line-height:2.2; }
+  .legend { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; padding:4px 2px 2px; font-size:8px; line-height:2; }
   /* Compass: the dial turns with the map; tap to point north (or, in drive mode, toggle heading-up / north-up). */
   .compass { position:absolute; right:12px; top:120px; z-index:6; width:52px; height:52px; padding:0; cursor:pointer;
              display:grid; place-items:center; border-radius:50%; background:var(--paper); border:4px double var(--frame);
@@ -90,7 +91,6 @@
                        color:var(--ink); background:var(--paper); border:2px solid var(--frame); border-radius:3px; padding:2px 3px; white-space:nowrap; }
   .compass .mode-tag[hidden] { display:none; }
   .legend i { display:inline-block; width:22px; height:8px; margin-right:6px; vertical-align:middle; border:2px solid #202020; }
-  .legend .theme-name { margin-top:2px; color:var(--muted); }
 
   .dialog { position:absolute; left:12px; right:12px; bottom:calc(var(--google-bar) + 10px); z-index:5;
             padding:12px 16px; font-size:11px; line-height:1.9; max-width:640px; }
@@ -177,7 +177,7 @@
   .mode-menu .pic { height:46px; display:flex; align-items:flex-end; justify-content:center; }
   .mode-menu .pic .avatar { transform:scale(.7); transform-origin:bottom center; }
   /* Drive mode */
-  body.driving .hud, body.driving .legend, body.driving .dialog { display:none; }
+  body.driving .hud, body.driving .dialog { display:none; }
   .drive-banner { position:absolute; left:12px; right:12px; top:12px; z-index:7; padding:12px 14px; display:flex; gap:12px; align-items:center; }
   .drive-banner .dist { font-size:15px; white-space:nowrap; }
   .drive-banner .text { font:600 16px/1.35 Roboto, Arial, sans-serif; }
@@ -205,7 +205,6 @@
     .hud #peek { padding-left:25px; }
     .hud #peek::before { left:6px; width:14px; height:10px; margin-top:-5px; background-size:14px 10px; }
     .dialog { left:8px; right:8px; font-size:9px; padding:9px 11px; line-height:1.8; }
-    .legend { right:8px; font-size:7px; padding:6px 8px; }
     .compass { right:8px; width:44px; height:44px; border-width:3px; }
     .drive-banner { left:8px; right:8px; top:8px; padding:9px 11px; }
     .drive-banner .dist { font-size:12px; }
@@ -238,16 +237,6 @@
 <button class="compass" id="compass" type="button" aria-label="Compass. Tap to point the map north.">
   <span class="mode-tag" id="compassTag" hidden></span>
 </button>
-<div class="box legend" id="legend" hidden>
-  <div><i id="legendSample"></i><span id="legendMode">CAR</span></div>
-  <div id="trafficRows">
-    <div><i data-k="clear"></i>CLEAR</div>
-    <div><i data-k="slow"></i>SLOW</div>
-    <div><i data-k="jam"></i>JAM</div>
-  </div>
-  <div class="theme-name" id="themeName"></div>
-</div>
-
 <div class="settings" id="settings" hidden>
   <div class="box panel" role="dialog" aria-modal="true" aria-label="Settings">
     <div class="panel-head">SETTINGS <button type="button" data-close="settings" aria-label="Close settings">X</button></div>
@@ -257,6 +246,8 @@
     <div class="choices small" id="darkModes"></div>
     <div class="section">ROUTE COLORS</div>
     <div class="choices small" id="routeThemes"></div>
+    <div class="section">ROUTE KEY</div>
+    <div class="legend" id="legend"></div>
     <div class="section">FOG OF WAR</div>
     <div class="choices small" id="fogModes"></div>
     <div class="section">WEATHER EFFECTS</div>
@@ -390,11 +381,10 @@ const goBtn = $('go'), startBtn = $('start'), previewBtn = $('preview'), dialog 
 
 function paintLegend() {
   const t = R.THEMES[themeIdx];
-  document.querySelectorAll('#trafficRows i').forEach((i) => { i.style.background = t[i.dataset.k]; });
-  $('legendSample').style.cssText = R.sampleCSS(routeMode, t);
-  $('legendMode').textContent = R.MODES.find((m) => m.id === routeMode).label;
-  $('trafficRows').hidden = routeMode === 'WALK' || routeMode === 'TRANSIT';   // no road traffic for these
-  $('themeName').textContent = 'COLORS: ' + t.name;
+  // Settings > ROUTE KEY: each travel mode's line, then the traffic colors (CAR / BIKE routes).
+  $('legend').innerHTML = R.MODES.map((m) => `<div><i style="${R.sampleCSS(m.id, t)}"></i>${m.label}</div>`).join('')
+    + [['clear', 'CLEAR'], ['slow', 'SLOW'], ['jam', 'JAM']].map(([k, label]) =>
+        `<div><i style="background:${t[k]}"></i>${label} TRAFFIC</div>`).join('');
   R.applyTheme(pmap, t);
   R.setMode(pmap, routeMode);
   drawGoogleRoute();
@@ -460,11 +450,11 @@ function addArtLayers() {
   if (A.landmarks && A.landmarks.length && !pmap.getSource('landmarks')) {
     pmap.addSource('landmarks', { type: 'geojson', data: { type: 'FeatureCollection', features: A.landmarks.map((l) => ({
       type: 'Feature', properties: { id: l.id, name: l.name }, geometry: { type: 'Point', coordinates: [l.lng, l.lat] } })) } });
-    pmap.addLayer({ id: 'landmarks', type: 'symbol', source: 'landmarks', minzoom: 12.5,
+    pmap.addLayer({ id: 'landmarks', type: 'symbol', source: 'landmarks', minzoom: 13,
       layout: {
         'icon-image': ['concat', 'lm-', ['get', 'id']], 'icon-anchor': 'bottom',
         'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        'icon-size': ['interpolate', ['exponential', 1.5], ['zoom'], 12.5, 0.45, 15, 0.8, 17, 1.2, 19, 2],
+        'icon-size': ['interpolate', ['exponential', 1.5], ['zoom'], 13, 0.32, 15, 0.7, 17, 1.2, 19, 2],
         'text-field': ['step', ['zoom'], '', 15.5, ['upcase', ['get', 'name']]], 'text-font': ['Noto Sans Bold'],
         'text-size': 11, 'text-anchor': 'top', 'text-offset': [0, 0.3], 'text-optional': true,
       },
@@ -681,9 +671,11 @@ renderSavedMarkers();
 function describe(ll) {
   const feats = pmap.queryRenderedFeatures(pmap.project([ll.lng, ll.lat]));
   const named = feats.find((f) => f.properties && f.properties.name && !f.layer.id.startsWith('route'));
-  const kind = feats.find((f) => ['building', 'park', 'water', 'road'].includes(f.layer.id));
+  const KIND = { building: 'that BUILDING', park: 'the GRASS', water: 'the WATER', road: 'that ROAD',
+                 'road-far': 'that ROAD', 'road-minor': 'that ROAD', 'road-minor-far': 'that ROAD' };
+  const kind = feats.find((f) => KIND[f.layer.id]);
   return named ? named.properties.name.toUpperCase()
-       : kind ? { building: 'that BUILDING', park: 'the GRASS', water: 'the WATER', road: 'that ROAD' }[kind.layer.id]
+       : kind ? KIND[kind.layer.id]
        : 'that SPOT';
 }
 let destPlaceId = null;   // Google place ID of the target, when it's a real place (enables INFO)
@@ -972,7 +964,6 @@ async function findRoute(opts = {}) {
   faceToward(coords[Math.min(6, coords.length - 1)][0]);
   target.remove();
   flag.setLngLat([dest.lng, dest.lat]).addTo(pmap);
-  $('legend').hidden = false;
 
   const dur = secs(route.duration), base = secs(route.staticDuration), delay = Math.max(0, dur - base);
   const jams = feats.filter((f) => f.properties.speed === 'TRAFFIC_JAM').length;
@@ -1268,7 +1259,7 @@ function clearRoute() {
   route = null; routeFeats = []; routeStops = []; routeCoords = []; steps = []; stepIdx = -1; summary = '';
   dest = null; destName = ''; destPlaceId = null;
   R.setRoute(pmap, []); target.remove(); flag.remove();
-  $('legend').hidden = true; $('infoBtn').hidden = true; dialog.classList.remove('clickable');
+  $('infoBtn').hidden = true; dialog.classList.remove('clickable');
   goBtn.disabled = true; startBtn.disabled = true; previewBtn.disabled = true;
   drawGoogleRoute(); syncGoogleDest();
   msg('Route cleared.<br>Search, or tap a spot, then press GO!');
@@ -1339,12 +1330,11 @@ $('compass').onclick = () => {
 };
 let compassTween = 0;
 
-// Keep the compass and the route legend just below the top bar (or the drive banner), however tall it is.
+// Keep the compass just below the top bar (or the drive banner), however tall it is.
 function placeFloaters() {
   const top = document.body.classList.contains('driving') ? $('driveBanner') : document.querySelector('.hud');
   const y = Math.round(top.getBoundingClientRect().bottom) + 10;
   $('compass').style.top = y + 'px';
-  $('legend').style.top = (y + $('compass').offsetHeight + 14) + 'px';
 }
 new ResizeObserver(placeFloaters).observe(document.querySelector('.hud'));
 new ResizeObserver(placeFloaters).observe($('driveBanner'));

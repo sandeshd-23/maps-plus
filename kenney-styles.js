@@ -107,15 +107,22 @@
 
   // Line patterns run along the road, so turn the tile sideways-safe: MapLibre maps the image's
   // vertical axis across the road width, which is what Kenney's horizontal road tiles expect.
-  const width = (a, b, c) => ['interpolate', ['exponential', 1.6], ['zoom'], 12, a, 15, b, 18, c];
   const ROADS = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service'];
   const MAJOR = ['motorway', 'trunk', 'primary', 'secondary'];
   const FONT = ['Noto Sans Bold'];
+  const MINOR = ['tertiary', 'minor', 'service'];
   const TREE_ZOOM = (window.Trees && window.Trees.MIN_ZOOM) || 15;
-  // Zoom interpolation must be outermost, so the major/minor choice goes inside each stop.
-  const byKind = (major, minor) => ['match', ['get', 'class'], MAJOR, major, minor];
-  const casingWidth = ['interpolate', ['exponential', 1.6], ['zoom'],
-    12, byKind(7, 4), 15, byKind(22, 14), 18, byKind(64, 40)];
+  // Road widths, fading and labels per zoom: see map-scale.js. Zoomed out, a road is only 1-4 px wide,
+  // too thin for the road tile texture, so it's drawn in the texture's average color until TEXTURE_ZOOM.
+  const S = window.MapScale;
+  const TEXTURE_ZOOM = 14;
+  function averageColor(img) {
+    const d = img.data; let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 128) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    if (!n) return '#808080';
+    const h = (v) => Math.round(v / n).toString(16).padStart(2, '0');
+    return '#' + h(r) + h(g) + h(b);
+  }
 
   // Building borders and shadows have a fixed on-screen size, so on small zoomed-out buildings they
   // swallow the roof color and everything turns black. Fade both in only as you zoom closer.
@@ -128,7 +135,7 @@
   const SHADOW = ['interpolate', ['linear'], ['zoom'], OUTLINE_FROM, 'rgba(0,0,0,0)', OUTLINE_FULL, 'rgba(0,0,0,0.31)'];
   const SHADOW_OFFSET = ['interpolate', ['linear'], ['zoom'], OUTLINE_FROM, ['literal', [0, 0]], OUTLINE_FULL, ['literal', [3, 3]]];
 
-  function styleFor(t) {
+  function styleFor(t, avg) {
     const P = (id) => 'k-' + t.id + '-' + id;
     return {
       version: 8,
@@ -147,37 +154,32 @@
           filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': P('park') } },
         { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-pattern': P('water') } },
         { id: 'water-edge', type: 'line', source: 'omt', 'source-layer': 'water',
-          paint: { 'line-color': t.waterEdge, 'line-width': 2 } },
-        { id: 'road-casing', type: 'line', source: 'omt', 'source-layer': 'transportation',
+          paint: { 'line-color': t.waterEdge, 'line-width': S.waterEdge() } },
+        { id: 'road-casing', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 12,
           filter: ['in', ['get', 'class'], ['literal', ROADS]], layout: { 'line-cap': 'butt', 'line-join': 'miter' },
-          paint: { 'line-color': t.casing, 'line-width': casingWidth } },
-        { id: 'road-minor', type: 'line', source: 'omt', 'source-layer': 'transportation',
-          filter: ['in', ['get', 'class'], ['literal', ['tertiary', 'minor', 'service']]], layout: { 'line-cap': 'butt', 'line-join': 'miter' },
-          paint: { 'line-pattern': P('roadMinor'), 'line-width': width(3, 10, 32) } },
-        { id: 'road', type: 'line', source: 'omt', 'source-layer': 'transportation',
+          paint: { 'line-color': t.casing, 'line-width': S.casingWidth(), 'line-opacity': S.casingOpacity() } },
+        { id: 'road-minor-far', type: 'line', source: 'omt', 'source-layer': 'transportation', maxzoom: TEXTURE_ZOOM,
+          filter: ['in', ['get', 'class'], ['literal', MINOR]], layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': avg.minor, 'line-width': S.roadWidth(), 'line-opacity': S.roadOpacity() } },
+        { id: 'road-far', type: 'line', source: 'omt', 'source-layer': 'transportation', maxzoom: TEXTURE_ZOOM,
+          filter: ['in', ['get', 'class'], ['literal', MAJOR]], layout: { 'line-cap': 'round', 'line-join': 'round' },
+          paint: { 'line-color': avg.major, 'line-width': S.roadWidth() } },
+        { id: 'road-minor', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: TEXTURE_ZOOM,
+          filter: ['in', ['get', 'class'], ['literal', MINOR]], layout: { 'line-cap': 'butt', 'line-join': 'miter' },
+          paint: { 'line-pattern': P('roadMinor'), 'line-width': S.roadWidth() } },
+        { id: 'road', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: TEXTURE_ZOOM,
           filter: ['in', ['get', 'class'], ['literal', MAJOR]], layout: { 'line-cap': 'butt', 'line-join': 'miter' },
-          paint: { 'line-pattern': P('roadMajor'), 'line-width': width(5, 16, 54) } },
-        { id: 'path', type: 'line', source: 'omt', 'source-layer': 'transportation',
+          paint: { 'line-pattern': P('roadMajor'), 'line-width': S.roadWidth() } },
+        { id: 'path', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 14,
           filter: ['in', ['get', 'class'], ['literal', ['path', 'track']]],
-          paint: { 'line-color': t.path, 'line-width': 3, 'line-dasharray': [2, 1] } },
+          paint: { 'line-color': t.path, 'line-width': S.pathWidth(), 'line-dasharray': [2, 1] } },
         { id: 'building-shadow', type: 'fill', source: 'omt', 'source-layer': 'building',
           paint: { 'fill-color': SHADOW, 'fill-translate': SHADOW_OFFSET } },
         // One solid roof color per theme (taken from the pack's roof tile).
         { id: 'building', type: 'fill', source: 'omt', 'source-layer': 'building',
           paint: { 'fill-color': t.building, 'fill-outline-color': fadeIn(t.roofEdge) } },
-        { id: 'water-name', type: 'symbol', source: 'omt', 'source-layer': 'water_name',
-          layout: { 'text-field': ['upcase', ['get', 'name']], 'text-font': FONT, 'text-size': 15 },
-          paint: { 'text-color': '#ffffff', 'text-halo-color': t.waterEdge, 'text-halo-width': 2 } },
-        { id: 'street-name', type: 'symbol', source: 'omt', 'source-layer': 'transportation_name',
-          filter: ['in', ['get', 'class'], ['literal', ['primary', 'secondary', 'tertiary', 'minor']]],
-          layout: { 'symbol-placement': 'line', 'text-field': ['upcase', ['get', 'name']], 'text-font': FONT, 'text-size': 13 },
-          paint: { 'text-color': t.streetLabel, 'text-halo-color': t.streetHalo, 'text-halo-width': 2 } },
-        { id: 'park-name', type: 'symbol', source: 'omt', 'source-layer': 'poi', filter: ['==', ['get', 'class'], 'park'],
-          layout: { 'text-field': ['upcase', ['get', 'name']], 'text-font': FONT, 'text-size': 15 },
-          paint: { 'text-color': '#ffffff', 'text-halo-color': '#2d5a23', 'text-halo-width': 2 } },
-        { id: 'place-name', type: 'symbol', source: 'omt', 'source-layer': 'place',
-          layout: { 'text-field': ['upcase', ['get', 'name']], 'text-font': FONT, 'text-size': 18 },
-          paint: { 'text-color': t.label, 'text-halo-color': t.labelHalo, 'text-halo-width': 2.5 } },
+        ...S.labels({ font: FONT, label: t.label, labelHalo: t.labelHalo, streetLabel: t.streetLabel,
+                      streetHalo: t.streetHalo, waterHalo: t.waterEdge, parkHalo: '#2d5a23' }),
       ],
     };
   }
@@ -198,8 +200,9 @@
     await Promise.all([...keys].map(async (k) => { sheets[k] = await loadSheet(k); }));
     const images = {};
     Object.entries(t.tex).forEach(([id, grid]) => { images['k-' + t.id + '-' + id] = compose(grid, sheets); });
+    const avg = { major: averageColor(images['k-' + t.id + '-roadMajor']), minor: averageColor(images['k-' + t.id + '-roadMinor']) };
     const trees = t.trees.map((ref) => compose([[[ref]]], sheets));   // single 16x16 tree sprites, transparent
-    return { style: styleFor(t), images, trees, player: t.player ? playerFrom(t.player, sheets) : null };
+    return { style: styleFor(t, avg), images, trees, player: t.player ? playerFrom(t.player, sheets) : null };
   }
 
   window.KenneyStyles = { THEMES, build };

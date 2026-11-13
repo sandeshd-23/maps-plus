@@ -16,7 +16,7 @@
  */
 'use strict';
 
-const VERSION = 'v4';
+const VERSION = 'v5';
 const PREFIX = 'mapsplus-';
 const SHELL_CACHE = PREFIX + 'shell-' + VERSION;
 const CDN_CACHE = PREFIX + 'cdn-' + VERSION;
@@ -34,6 +34,7 @@ const PRECACHE = [
   START_PAGE,
   'native.js',
   'crisp.js',
+  'map-scale.js',
   'pixel-style.js',
   'trees.js',
   'kenney-styles.js',

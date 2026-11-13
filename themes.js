@@ -103,7 +103,7 @@
       id: 'night-road-glow', type: 'line', source: 'omt', 'source-layer': 'transportation',
       filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary']]],
       paint: { 'line-color': 'rgba(255,196,96,0.34)', 'line-blur': 6,
-               'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 12, 8, 15, 28, 18, 80] },
+               'line-width': MapScale.glowWidth() },
     });
     return style;
   }

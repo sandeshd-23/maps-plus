@@ -94,7 +94,7 @@
   }
 
   const EMPTY = { type: 'FeatureCollection', features: [] };
-  const width = (a, b, c) => ['interpolate', ['linear'], ['zoom'], 12, a, 15, b, 18, c];
+  const width = (a, b, c) => window.MapScale.routeWidth(a, b, c);   // thinner when zoomed out (map-scale.js)
   const ll = (p) => p && p.latLng ? { lat: p.latLng.latitude, lng: p.latLng.longitude } : null;
 
   // Turn a Routes API route into map features + a flat coordinate list + simple step records.
@@ -190,7 +190,7 @@
                       'symbol-placement': 'line',
                       'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 12, 12, 15, 16, 18, 24],
                       'icon-image': 'route-dot',
-                      'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.55, 15, 0.8, 18, 1.15],
+                      'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.3, 12, 0.45, 15, 0.8, 18, 1.15],
                       'icon-allow-overlap': true, 'icon-ignore-placement': true,
                     } }, beforeId);
     // Metro / bus stops where you get on and off, and roadblocks on traffic jams.
@@ -198,7 +198,7 @@
     pmap.addLayer({ id: 'route-points', type: 'symbol', source: 'route-points',
                     layout: { 'icon-image': ['get', 'icon'], 'icon-allow-overlap': true, 'icon-ignore-placement': true,
                               'icon-anchor': 'bottom',
-                              'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.7, 16, 1, 18, 1.3] } }, beforeId);
+                              'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.4, 12, 0.55, 16, 1, 18, 1.3] } }, beforeId);
   }
 
   // 8x8 pixel dot with a dark outline and a highlight, in the theme's walking color.
