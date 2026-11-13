@@ -16,7 +16,7 @@
  */
 'use strict';
 
-const VERSION = 'v5';
+const VERSION = 'v7';
 const PREFIX = 'mapsplus-';
 const SHELL_CACHE = PREFIX + 'shell-' + VERSION;
 const CDN_CACHE = PREFIX + 'cdn-' + VERSION;
@@ -44,6 +44,11 @@ const PRECACHE = [
   'geo-utils.js',
   'progress.js',
   'fog.js',
+  'metro-data.js',
+  'hazards.js',
+  'trips.js',
+  'collection.js',
+  'photos.js',
   'pixel-art.js',
   'sky.js',
   'sfx.js',

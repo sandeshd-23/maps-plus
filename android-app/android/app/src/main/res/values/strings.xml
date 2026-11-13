@@ -8,4 +8,9 @@
     <string name="capacitor_background_geolocation_notification_channel_name">Navigation</string>
     <string name="capacitor_background_geolocation_notification_icon">drawable/ic_tracking</string>
     <string name="capacitor_background_geolocation_notification_color">#e8302c</string>
+    <!-- App icon long-press shortcuts -->
+    <string name="shortcut_home_short">Go Home</string>
+    <string name="shortcut_home_long">Ride home (BIKE)</string>
+    <string name="shortcut_work_short">Go to Work</string>
+    <string name="shortcut_work_long">Ride to work (BIKE)</string>
 </resources>

@@ -31,7 +31,11 @@
     let data = img, pr = 1 / cssPerTexel;
     if (Number.isInteger(s) && s > 1) { data = upscale(img, s); pr = P; }
     if (map.hasImage(id)) {
-      try { map.updateImage(id, data); return; } catch (_) { map.removeImage(id); }   // size changed
+      // updateImage only works for the same size (it reports an error instead of throwing), so check first.
+      const old = map.getImage && map.getImage(id);
+      const same = old && old.data && old.data.width === data.width && old.data.height === data.height && old.pixelRatio === pr;
+      if (same) { try { map.updateImage(id, data); return; } catch (_) {} }
+      map.removeImage(id);
     }
     map.addImage(id, data, { pixelRatio: pr });
   }

@@ -1,6 +1,6 @@
 // Original pixel-art sprites for Maps+ (Bengaluru landmarks, POI icons, jam obstacles, saved-place pins).
 // Every sprite is a list of row strings, one character per pixel ('.' = transparent), coloured via PALETTE.
-// Exposes window.PixelArt = { landmarks: [{ id, name, lat, lng, image }], poiIcons, obstacles, savedIcons },
+// Exposes window.PixelArt = { landmarks: [{ id, name, lat, lng, image }], poiIcons, obstacles, savedIcons, hazards, misc },
 // where every image is an ImageData (1 sprite pixel = 1 image pixel; upscale with nearest-neighbour).
 // Landmark coordinates are the building itself, from OpenStreetMap (Nominatim), Nov 2026.
 (() => {
@@ -328,6 +328,103 @@
         "KggggggggggggggggggggggggggggggggggggK",
         "KGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGK",
         ".KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK."
+      ]
+    },
+    "hazards": {
+      "pothole": [
+        ".KKKKKKKKKK.",
+        "KOOOOOOOOOOK",
+        "KOOOOOOOOOoK",
+        "KOOOkkkkOOoK",
+        "KOOkKKKKkOoK",
+        "KOkKKKKKKkoK",
+        "KOkKKKKKKkoK",
+        "KOOkKKKKkOoK",
+        "KOOOkkkkOOoK",
+        "KOOOOOOOOOoK",
+        "KOoooooooooK",
+        ".KKKKKKKKKK."
+      ],
+      "flood": [
+        ".KKKKKKKKKK.",
+        "KOOOOOOOOOOK",
+        "KOOOOOOOOOoK",
+        "KOOOBOOOBOoK",
+        "KOOBOBOBOBoK",
+        "KOBOOOBOOOoK",
+        "KOOOBOOOBOoK",
+        "KOOBOBOBOBoK",
+        "KOBOOOBOOOoK",
+        "KOOOOOOOOOoK",
+        "KOoooooooooK",
+        ".KKKKKKKKKK."
+      ],
+      "bump": [
+        ".KKKKKKKKKK.",
+        "KOOOOOOOOOOK",
+        "KOOOOOOOOOoK",
+        "KOOOOOOOOOoK",
+        "KOOOOOOOOOoK",
+        "KOOOOKKOOOoK",
+        "KOOOKWWKOOoK",
+        "KOOKWKKWKOoK",
+        "KOKKKKKKKKoK",
+        "KOOOOOOOOOoK",
+        "KOoooooooooK",
+        ".KKKKKKKKKK."
+      ],
+      "badroad": [
+        ".KKKKKKKKKK.",
+        "KOOOOOOOOOOK",
+        "KOKOOOOOOKoK",
+        "KOKOOWOOOKoK",
+        "KOKOOOWOOKoK",
+        "KOKOWOOOOKoK",
+        "KOKOOOWWOKoK",
+        "KOKOOWOOOKoK",
+        "KOKOOOOWOKoK",
+        "KOKOOOOOOKoK",
+        "KOoooooooooK",
+        ".KKKKKKKKKK."
+      ],
+      "caution": [
+        ".KKKKKKKKKK.",
+        "KOOOOOOOOOOK",
+        "KOOOOKKOOOoK",
+        "KOOOOKKOOOoK",
+        "KOOOOKKOOOoK",
+        "KOOOOKKOOOoK",
+        "KOOOOKKOOOoK",
+        "KOOOOOOOOOoK",
+        "KOOOOKKOOOoK",
+        "KOOOOOOOOOoK",
+        "KOoooooooooK",
+        ".KKKKKKKKKK."
+      ]
+    },
+    "misc": {
+      "metro": [
+        ".KKKKKKKKKK.",
+        "KVVVVVVVVVVK",
+        "KVVVVVVVVVvK",
+        "KVVWVVVVWVvK",
+        "KVVWWVVWWVvK",
+        "KVVWVWWVWVvK",
+        "KVVWVVVVWVvK",
+        "KVVWVVVVWVvK",
+        "KVVWVVVVWVvK",
+        "KVVVVVVVVVvK",
+        "KVvvvvvvvvvK",
+        ".KKKKKKKKKK."
+      ],
+      "star": [
+        "...K...",
+        "..KYK..",
+        "KKYYYKK",
+        ".KYYYK.",
+        ".KYKYK.",
+        "KYK.KYK",
+        "KK...KK"
       ]
     },
     "poiIcons": {
@@ -924,5 +1021,7 @@
     poiIcons: build('poiIcons'),
     obstacles: build('obstacles'),
     savedIcons: build('savedIcons'),
+    hazards: build('hazards'),
+    misc: build('misc'),
   };
 })();

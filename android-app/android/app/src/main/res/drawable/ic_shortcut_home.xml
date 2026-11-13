@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pixel house on a blue circle -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="16" android:viewportHeight="16">
+    <path android:fillColor="#3a78d8" android:pathData="M8,0 A8,8 0 1,1 7.99,0 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M8,3h1v1h1v1h1v1h1v1h-1v5h-2v-3h-2v3h-2v-5h-1v-1h1v-1h1v-1h1v-1h1z" />
+</vector>

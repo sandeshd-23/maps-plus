@@ -76,6 +76,23 @@
     } catch (_) {}
   }
 
+  // Home-screen shortcuts ("Go Home" / "Go to Work" when you long-press the app icon) open mapsplus://go/home.
+  // The page picks them up through window.onMapsPlusShortcut (or later, if the page isn't ready yet).
+  if (isApp) {
+    const handleUrl = (url) => {
+      const m = /go\/(home|work)/.exec(url || '');
+      if (!m) return;
+      if (window.onMapsPlusShortcut) window.onMapsPlusShortcut(m[1]);
+      else window.__mapsplusPendingShortcut = m[1];
+    };
+    try { cap.nativeCallback('App', 'addListener', { eventName: 'appUrlOpen' }, (d) => handleUrl(d && d.url)); } catch (_) {}
+    call('App', 'getLaunchUrl').then((r) => {
+      if (!r || !r.url) return;
+      try { if (sessionStorage.getItem('mapsplus.launched') === r.url) return; sessionStorage.setItem('mapsplus.launched', r.url); } catch (_) {}
+      handleUrl(r.url);
+    });
+  }
+
   window.Native = {
     isApp,
     watch,

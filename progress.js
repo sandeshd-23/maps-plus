@@ -91,5 +91,6 @@
   window.Progress = {
     state, BADGES, level, levelInfo, totalKm, award, addDistance, markNight, visitCell, visitPark, visitLandmark,
     visitLake, tripStarted, tripFinished, on: (cb) => listeners.push(cb),
+    gainXp(n) { addXp(n); save(); },        // XP from other features (collection book, ...)
   };
 })();

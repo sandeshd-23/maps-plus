@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pixel briefcase on a brown circle -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="16" android:viewportHeight="16">
+    <path android:fillColor="#8a5a2c" android:pathData="M8,0 A8,8 0 1,1 7.99,0 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M6,4h4v2h2v6h-8v-6h2z M7,5v1h2v-1z" android:fillType="evenOdd" />
+</vector>

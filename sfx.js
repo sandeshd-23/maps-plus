@@ -190,6 +190,31 @@
       tone('square', 183, t, 0.12, 0.15, 152); // slight detune for grit
       noise(t, 0.05, 0.15, 600);
     },
+    // Caught a place for the collection book: bouncy rising chime (~0.6 s)
+    catchit: function (t) {
+      seq('pulse25', [['C5', 1], ['E5', 1], ['G5', 1], ['C6', 2], ['E6', 1], ['G6', 3]], t, 0.06, 0.45);
+      seq('triangle', [['C4', 3], ['G4', 6]], t, 0.06, 0.6);
+      noise(t + 0.3, 0.05, 0.15, 5000);
+    },
+    // Rare / legendary catch: bigger fanfare with a shimmering top (~1.3 s)
+    legendary: function (t) {
+      var s = 0.075;
+      var end = seq('pulse25', [['G4', 1], ['C5', 1], ['E5', 1], ['G5', 2], ['E5', 1], ['G5', 1], ['C6', 4]], t, s, 0.5);
+      seq('pulse12', [['E5', 1], ['G5', 1], ['C6', 1], ['E6', 2], ['C6', 1], ['E6', 1], ['G6', 4]], t, s, 0.22);
+      seq('triangle', [['C3', 3], ['G3', 3], ['C4', 5]], t, s, 0.8);
+      seq('pulse12', [['C7', 1], ['G6', 1], ['E7', 1], ['C7', 1], ['G7', 2]], end, 0.045, 0.2);
+      noise(t, 0.08, 0.25, 2500); noise(end, 0.15, 0.2, 6000);
+    },
+    // Shiny: sparkling high glissando (~0.5 s)
+    shiny: function (t) {
+      seq('pulse12', [['E7', 1], ['B6', 1], ['G#6', 1], ['E6', 1], ['B6', 1], ['E7', 1], ['G#7', 3]], t, 0.04, 0.3);
+      seq('pulse12', [['E7', 1], ['B6', 1], ['G#6', 1], ['E6', 1], ['B6', 1], ['E7', 1], ['G#7', 3]], t + 0.06, 0.04, 0.12);
+    },
+    // Hazard ahead: two urgent beeps (~0.35 s)
+    hazard: function (t) {
+      tone('square', hz('A5'), t, 0.12, 0.35);
+      tone('square', hz('A5'), t + 0.18, 0.14, 0.35);
+    },
     // Save: soft confirm "tick-ding" (~0.35 s)
     save: function (t) {
       noise(t, 0.02, 0.2, 4000);

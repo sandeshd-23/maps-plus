@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the Maps+ icon: start BIKE navigation to your saved HOME or WORK (set them in PLACES). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="go_home"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_home"
+        android:shortcutShortLabel="@string/shortcut_home_short"
+        android:shortcutLongLabel="@string/shortcut_home_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.sandeshd23.mapsplus"
+            android:targetClass="io.github.sandeshd23.mapsplus.MainActivity"
+            android:data="mapsplus://go/home" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="go_work"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_work"
+        android:shortcutShortLabel="@string/shortcut_work_short"
+        android:shortcutLongLabel="@string/shortcut_work_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="io.github.sandeshd23.mapsplus"
+            android:targetClass="io.github.sandeshd23.mapsplus.MainActivity"
+            android:data="mapsplus://go/work" />
+    </shortcut>
+</shortcuts>
