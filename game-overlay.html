@@ -90,6 +90,7 @@
   .compass .mode-tag { position:absolute; bottom:-14px; left:50%; transform:translateX(-50%); font:7px 'Press Start 2P', monospace;
                        color:var(--ink); background:var(--paper); border:2px solid var(--frame); border-radius:3px; padding:2px 3px; white-space:nowrap; }
   .compass .mode-tag[hidden] { display:none; }
+  .choice .ico { display:block; width:24px; height:24px; image-rendering:pixelated; margin-bottom:4px; }
   .legend i { display:inline-block; width:22px; height:8px; margin-right:6px; vertical-align:middle; border:2px solid #202020; }
 
   .dialog { position:absolute; left:12px; right:12px; bottom:calc(var(--google-bar) + 10px); z-index:5;
@@ -248,6 +249,8 @@
     <div class="choices small" id="routeThemes"></div>
     <div class="section">ROUTE KEY</div>
     <div class="legend" id="legend"></div>
+    <div class="section">MAP ICONS</div>
+    <div class="choices small" id="iconGroups"></div>
     <div class="section">FOG OF WAR</div>
     <div class="choices small" id="fogModes"></div>
     <div class="section">WEATHER EFFECTS</div>
@@ -444,6 +447,51 @@ function artImages() {
   out.push({ id: 'stop-bus', data: (A.poiIcons && A.poiIcons.bus) || fallbackIcon('#2e8b3e') });
   return out;
 }
+// OpenStreetMap kinds -> pixel icon (pixel-art.js poiIcons). Classes that share a name with an icon map to it directly.
+const POI_SUBCLASS = {
+  beauty: 'salon', hairdresser: 'salon', electronics: 'mobile', mobile_phone: 'mobile', computer: 'mobile',
+  jewelry: 'jewelry', mall: 'mall', department_store: 'mall', convenience: 'grocery', supermarket: 'grocery',
+  greengrocer: 'grocery', clothes: 'clothes', shoes: 'clothes', boutique: 'clothes', bakery: 'bakery',
+  confectionery: 'bakery', pub: 'bar', clinic: 'hospital', dentist: 'hospital', fitness_centre: 'gym',
+  charging_station: 'ev',                                  // EV charging / battery swap (class "fuel" in the data)
+};
+// Settings > MAP ICONS: icon groups you can switch off. Every icon above belongs to one group.
+const ICON_GROUPS = [
+  { id: 'food',      label: 'FOOD',       keys: ['restaurant', 'fast_food', 'cafe', 'bakery', 'ice_cream'] },
+  { id: 'drinks',    label: 'BARS',       keys: ['bar'] },
+  { id: 'shops',     label: 'SHOPS',      keys: ['shop', 'clothes', 'grocery', 'mall', 'jewelry', 'mobile'] },
+  { id: 'fuel',      label: 'PETROL',     keys: ['fuel'] },
+  { id: 'ev',        label: 'EV CHARGE',  keys: ['ev'] },
+  { id: 'money',     label: 'BANK / ATM', keys: ['bank', 'atm'] },
+  { id: 'health',    label: 'HEALTH',     keys: ['hospital', 'pharmacy'] },
+  { id: 'services',  label: 'SERVICES',   keys: ['salon', 'gym', 'lodging', 'police'] },
+  { id: 'transport', label: 'BUS / TRAIN', keys: ['bus', 'railway'] },
+  { id: 'learning',  label: 'SCHOOLS',    keys: ['school', 'college', 'library'] },
+  { id: 'places',    label: 'PLACES',     keys: ['place_of_worship', 'park', 'attraction', 'cinema'] },
+  { id: 'landmarks', label: 'LANDMARKS',  keys: [] },        // the big pixel landmarks
+];
+const iconsOff = new Set((() => { try { return JSON.parse(store.get('mapsplus.iconsOff')) || []; } catch (_) { return []; } })());
+let poiIconExpr = null, poiBaseFilter = null;
+function applyIconFilter() {
+  if (pmap.getLayer('landmarks')) pmap.setLayoutProperty('landmarks', 'visibility', iconsOff.has('landmarks') ? 'none' : 'visible');
+  if (!pmap.getLayer('poi-icons') || !poiIconExpr) return;
+  const hidden = ICON_GROUPS.filter((g) => iconsOff.has(g.id)).flatMap((g) => g.keys.map((k) => 'poi-' + k));
+  pmap.setFilter('poi-icons', hidden.length ? ['all', poiBaseFilter, ['!', ['in', poiIconExpr, ['literal', hidden]]]] : poiBaseFilter);
+}
+function toggleIconGroup(id) {
+  if (iconsOff.has(id)) iconsOff.delete(id); else iconsOff.add(id);
+  store.set('mapsplus.iconsOff', JSON.stringify([...iconsOff]));
+  applyIconFilter();
+}
+// Small pixel picture of a group's first icon, for its button.
+function iconPreview(key) {
+  const img = window.PixelArt && PixelArt.poiIcons && PixelArt.poiIcons[key];
+  if (!img) return null;
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; c.className = 'ico';
+  c.getContext('2d').putImageData(img, 0, 0); c.setAttribute('aria-hidden', 'true');
+  return c;
+}
+const POI_CLASS = { clothing_store: 'clothes', beer: 'bar', hairdresser: 'salon', sports_centre: 'gym', dentist: 'hospital' };
 function addArtLayers() {
   const A = window.PixelArt;
   if (!A || !pmap.getLayer('water-name')) return;
@@ -460,13 +508,38 @@ function addArtLayers() {
       },
       paint: { 'text-color': '#ffffff', 'text-halo-color': '#202030', 'text-halo-width': 2 } }, 'water-name');
   }
-  const classes = Object.keys(A.poiIcons || {});
-  if (classes.length && !pmap.getLayer('poi-icons')) {
-    pmap.addLayer({ id: 'poi-icons', type: 'symbol', source: 'omt', 'source-layer': 'poi', minzoom: 16,
-      filter: ['in', ['get', 'class'], ['literal', classes]],
-      layout: { 'icon-image': ['concat', 'poi-', ['get', 'class']], 'icon-padding': 6,
-                'icon-size': ['interpolate', ['linear'], ['zoom'], 16, 0.8, 18, 1.2] } }, 'water-name');
+  const icons = A.poiIcons || {};
+  if (Object.keys(icons).length && !pmap.getLayer('poi-icons')) {
+    // Which icon each OpenStreetMap place gets: by its kind (subclass) first, else its class.
+    const bySub = {}, byClass = {};
+    Object.entries(POI_SUBCLASS).forEach(([sub, key]) => { if (icons[key]) (bySub[key] = bySub[key] || []).push(sub); });
+    Object.keys(icons).forEach((key) => { (byClass[key] = byClass[key] || []).push(key); });
+    Object.entries(POI_CLASS).forEach(([cls, key]) => { if (icons[key]) (byClass[key] = byClass[key] || []).push(cls); });
+    const groups = (m) => Object.entries(m).flatMap(([key, list]) => [list, 'poi-' + key]);
+    const str = (k) => ['coalesce', ['get', k], ''];          // some places have no subclass
+    const iconExpr = ['match', str('subclass'), ...groups(bySub), ['match', str('class'), ...groups(byClass), '']];
+    const subs = Object.values(bySub).flat(), classes = Object.values(byClass).flat();
+    // minzoom a hair under 15: the synced camera sits at 14.99999 for Google zoom 16.
+    poiIconExpr = iconExpr;
+    poiBaseFilter = ['all', ['any', ['has', 'name'], ['==', str('class'), 'fuel']],   // pumps often have no name
+      ['any', ['in', str('subclass'), ['literal', subs]], ['in', str('class'), ['literal', classes]]]];
+    pmap.addLayer({ id: 'poi-icons', type: 'symbol', source: 'omt', 'source-layer': 'poi', minzoom: 14.9,
+      filter: poiBaseFilter,
+      layout: {
+        'icon-image': iconExpr, 'icon-padding': 1,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 15, 0.55, 16, 0.75, 18, 1.1],
+        // Busier, better-known places win space; petrol pumps, EV points, hospitals and ATMs first.
+        'symbol-sort-key': ['+', ['coalesce', ['get', 'rank'], 99],
+          ['match', str('class'), 'fuel', -200, ['hospital', 'atm', 'pharmacy'], -60, 0]],
+        // Names from Google zoom 17 up; an icon still shows if its name doesn't fit. (Symbol layout sees the
+        // tile's zoom, one below the camera's for these 512 px tiles, so 15 here = camera zoom 16.)
+        'text-field': ['step', ['zoom'], '', 15, ['coalesce', ['get', 'name_en'], ['get', 'name:latin'], ['get', 'name']]],
+        'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 16, 9, 18, 11],
+        'text-anchor': 'top', 'text-offset': [0, 1.1], 'text-max-width': 8, 'text-optional': true,
+      },
+      paint: { 'text-color': '#ffffff', 'text-halo-color': '#202030', 'text-halo-width': 1.6 } }, 'water-name');
   }
+  applyIconFilter();
 }
 
 // Every new style: add textures + art, then put the route back on top (keeps an active route across switches).
@@ -523,6 +596,13 @@ function renderSettings() {
   fill('routeThemes', R.THEMES.map((t, k) => choiceButton(t.name, k === themeIdx, () => {
     themeIdx = k; store.set('mapsplus.theme', t.id); paintLegend(); renderSettings();
   }, [t.clear, t.slow, t.jam])));
+
+  fill('iconGroups', ICON_GROUPS.map((g) => {
+    const b = choiceButton(g.label, !iconsOff.has(g.id), () => { toggleIconGroup(g.id); renderSettings(); }, null,
+      iconsOff.has(g.id) ? 'HIDDEN' : '');
+    const pic = iconPreview(g.keys[0]); if (pic) b.prepend(pic);
+    return b;
+  }));
 
   fill('fogModes', [['off', 'OFF'], ['on', 'ON', 'REVEALS WHERE YOU GO (GPS)']].map(([v, label, hint]) =>
     choiceButton(label, settings.fog === v, () => {
@@ -722,6 +802,56 @@ function drawGoogleRoute() {
     line({ path, strokeColor: t.casing, strokeWeight: 10, strokeOpacity: 0.9, zIndex: 1 });
     line({ path, strokeColor: color, strokeWeight: 6, strokeOpacity: 1, zIndex: 2 });
   });
+}
+
+// Tapping one of our shop / restaurant / landmark icons: find the same place on Google (same name, within
+// ~120 m) and open its place card. The lookup asks Google for the place ID only ("Text Search Essentials
+// IDs Only", free with no monthly limit); the place card then costs the same as pressing INFO.
+const MATCH_M = 120;
+const matchCache = new Map();                          // "name@lat,lng" -> Google place ID, or '' if none
+function iconAt(latLng) {
+  const pt = pmap.project([latLng.lng, latLng.lat]);
+  const layers = ['poi-icons', 'landmarks'].filter((id) => pmap.getLayer(id));
+  if (!layers.length) return null;
+  const feats = pmap.queryRenderedFeatures([[pt.x - 16, pt.y - 22], [pt.x + 16, pt.y + 14]], { layers });
+  let best = null, bestD = Infinity;
+  feats.forEach((f) => {
+    const [lng, lat] = f.geometry.coordinates, p = pmap.project([lng, lat]);
+    const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+    if (d < bestD) { best = f; bestD = d; }
+  });
+  return best;
+}
+const titleCase = (t) => String(t || '').replace(/_/g, ' ').toUpperCase();
+async function selectIconPlace(f) {
+  const [lng, lat] = f.geometry.coordinates, pos = { lat, lng };
+  const p = f.properties || {};
+  const name = p.name_en || p['name:latin'] || p.name
+    || (p.subclass === 'charging_station' ? 'EV charging station' : p.class === 'fuel' ? 'Petrol pump' : 'Place');
+  const kind = f.layer.id === 'landmarks' ? 'LANDMARK' : p.subclass === 'charging_station' ? 'EV CHARGING'
+    : p.class === 'fuel' ? 'PETROL PUMP' : titleCase(p.subclass || p.class);
+  setDestination(pos, name);
+  const mine = destName;
+  msg(`${esc(destName)} (${esc(kind)})<br>Looking it up on Google...`);
+  const id = await findOnGoogle(name, pos);
+  if (!dest || destName !== mine) return;                  // you picked something else meanwhile
+  if (id) { setDestination(pos, name, id); openPlaceCard(id); }
+  else msg(`${esc(destName)} (${esc(kind)})<br>Not on Google nearby. Press GO! (${R.MODES[modeIdx].label})`);
+}
+async function findOnGoogle(name, pos) {
+  const key = `${name}@${pos.lat.toFixed(5)},${pos.lng.toFixed(5)}`;
+  if (matchCache.has(key)) return matchCache.get(key);
+  try {
+    placesLib = placesLib || await google.maps.importLibrary('places');
+    const dLat = MATCH_M / 111320, dLng = MATCH_M / (111320 * Math.cos(pos.lat * Math.PI / 180));
+    const { places } = await placesLib.Place.searchByText({
+      textQuery: name, fields: ['id'], maxResultCount: 1,
+      locationRestriction: { north: pos.lat + dLat, south: pos.lat - dLat, east: pos.lng + dLng, west: pos.lng - dLng },
+    });
+    const id = (places && places[0] && places[0].id) || '';
+    matchCache.set(key, id);
+    return id;
+  } catch (err) { console.warn('Google match failed:', err); return ''; }
 }
 
 // Tapping a real place on Google's map selects that place (and its name) instead of just the spot.
@@ -1447,6 +1577,8 @@ window.initMap = () => {
   gmap.addListener('click', (e) => {
     hideResults();
     const pos = { lat: e.latLng.lat(), lng: e.latLng.lng() };
+    const icon = iconAt(pos);           // one of our pixel icons: that's what you see, so it wins
+    if (icon) { if (e.placeId) e.stop(); selectIconPlace(icon); return; }
     if (e.placeId) {                    // a real Google place (shop, temple, park...): select that place
       e.stop();                         // (we show our own place card instead of Google's popup)
       selectGooglePlace(e.placeId, pos);

@@ -36,7 +36,7 @@
     10, +(a * 0.45).toFixed(2), 12, +(a * 0.75).toFixed(2), 15, b, 18, c];
 
   const size = (...stops) => ['interpolate', ['linear'], ['zoom'], ...stops];
-  const NAME = ['upcase', ['get', 'name']];
+  const NAME = ['upcase', ['coalesce', ['get', 'name'], '']];
 
   // Label layers. 'water-name' must stay first: routes, trees and landmarks are inserted just below it.
   // c = { font, label, labelHalo, streetLabel, streetHalo, waterHalo, parkHalo, letterSpacing }
