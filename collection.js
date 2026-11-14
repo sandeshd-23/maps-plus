@@ -9,6 +9,7 @@
 (() => {
   const KEY = 'mapsplus.book', AREAS_KEY = 'mapsplus.bookAreas', NO_KEY = 'mapsplus.bookDeclined';
   const SHINY_ODDS = 20;
+  const landmarkCount = () => (window.PixelArt && PixelArt.landmarks && PixelArt.landmarks.length) || 23;
   const REVISIT_MS = 6 * 3600 * 1000;
   const DECLINE_MS = 7 * 24 * 3600 * 1000;      // "No, I wasn't there": don't ask again for a week
 
@@ -62,7 +63,7 @@
     { id: 'all4',     name: 'ALL-ROUNDER',      desc: 'Catch in all 4 chapters',       test: (s) => s.chapters >= 4 },
     { id: 'shiny',    name: 'SHINY HUNTER',     desc: 'Catch a shiny (1 in 20)',       test: (s) => s.shiny >= 1 },
     { id: 'legend',   name: 'LEGEND SEEKER',    desc: 'Catch a legendary landmark',    test: (s) => s.legendary >= 1 },
-    { id: 'legend10', name: 'CITY LEGEND',      desc: 'Catch all 10 landmarks',        test: (s) => s.legendary >= 10 },
+    { id: 'legend10', name: 'CITY LEGEND',      desc: 'Catch every landmark',          test: (s) => s.legendary >= landmarkCount() },
     { id: 'photo10',  name: 'PHOTOGRAPHER',     desc: 'Add 10 of your own photos',     test: (s) => s.photos >= 10 },
     { id: 'local',    name: 'LOCAL HERO',       desc: 'Catch 25 places in one area',   test: (s) => s.bestArea >= 25 },
   ];

@@ -1874,6 +1874,7 @@ const BOOK_AREAS = [
   ['SHIVAJINAGAR', 12.986, 77.606], ['MG ROAD', 12.975, 77.607], ['MAJESTIC', 12.977, 77.571], ['CITY MARKET', 12.963, 77.577],
   ['SHANTHINAGAR', 12.952, 77.600], ['INDIRANAGAR', 12.972, 77.641], ['CV RAMAN NAGAR', 12.985, 77.663], ['HAL AIRPORT ROAD', 12.959, 77.667],
   ['SAHAKAR NAGAR', 13.062, 77.586], ['JALAHALLI', 13.046, 77.548], ['MAHADEVAPURA', 12.991, 77.690], ['HOSKOTE ROAD', 13.040, 77.720],
+  ['KIA AIRPORT', 13.198, 77.707], ['NANDI HILLS', 13.370, 77.684], ['BANNERGHATTA', 12.801, 77.575],
 ].map(([name, lat, lng]) => ({ name, lat, lng }));
 const AREA_MAX_M = 6000;
 let areaCache = { t: 0, list: [] };
@@ -2153,7 +2154,7 @@ function bookFollow(pos) {
 function renderBook() {
   bookEntry = null;
   const body = $('bookBody'), s = Book.stats(), all = Book.entries();
-  body.innerHTML = `<div class="book-sum"><b>${s.total}</b> CAUGHT · <b>${s.shiny}</b> SHINY · <b>${s.legendary}</b>/10 LEGENDARY · <b>${s.photos}</b> PHOTOS</div>`
+  body.innerHTML = `<div class="book-sum"><b>${s.total}</b> CAUGHT · <b>${s.shiny}</b> SHINY · <b>${s.legendary}</b>/${(window.PixelArt && PixelArt.landmarks.length) || 0} LEGENDARY · <b>${s.photos}</b> PHOTOS</div>`
     + (settings.collect !== 'on' ? '<div class="empty">COLLECTING IS OFF. Turn it on in SETTINGS &gt; COLLECTION BOOK.</div>' : '')
     + '<div id="bookLive"></div>';
   renderBookLive();
