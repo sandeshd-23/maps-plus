@@ -609,7 +609,7 @@ const iconsOff = new Set((() => { try { return JSON.parse(store.get('mapsplus.ic
 let poiIconExpr = null, poiBaseFilter = null;
 function applyIconFilter() {
   if (pmap.getLayer('landmarks')) pmap.setLayoutProperty('landmarks', 'visibility', iconsOff.has('landmarks') ? 'none' : 'visible');
-  ['metro-casing', 'metro-line', 'metro-stations'].forEach((id) => {
+  ['metro-glow', 'metro-outline', 'metro-casing', 'metro-line', 'metro-shine', 'metro-stations'].forEach((id) => {
     if (pmap.getLayer(id)) pmap.setLayoutProperty(id, 'visibility', iconsOff.has('metro') ? 'none' : 'visible');
   });
   if (!pmap.getLayer('poi-icons') || !poiIconExpr) return;
@@ -636,15 +636,24 @@ function addArtLayers() {
   if (!A || !pmap.getLayer('water-name')) return;
   // Namma Metro lines, under the icons (each later layer is added just above the previous ones).
   if (window.MetroData && !pmap.getSource('metro-lines')) {
+    // Drawn like a glossy tube so every line reads on any theme (green on grass, yellow on sand...), with no
+    // animation: soft glow in the line's own colour > thin dark outline > white edge > line colour > faint
+    // highlight stripe on top.
+    const z = (...stops) => ['interpolate', ['linear'], ['zoom'], ...stops];
+    const round = { 'line-cap': 'round', 'line-join': 'round' };
     pmap.addSource('metro-lines', { type: 'geojson', data: MetroData.lines });
-    pmap.addLayer({ id: 'metro-casing', type: 'line', source: 'metro-lines', minzoom: 9,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#ffffff', 'line-opacity': 0.85,
-               'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2, 12, 4.5, 15, 8, 18, 13] } }, 'water-name');
-    pmap.addLayer({ id: 'metro-line', type: 'line', source: 'metro-lines', minzoom: 9,
-      layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': ['get', 'color'],
-               'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1, 12, 2.5, 15, 5, 18, 8] } }, 'water-name');
+    pmap.addLayer({ id: 'metro-glow', type: 'line', source: 'metro-lines', minzoom: 9, layout: round,
+      paint: { 'line-color': ['get', 'color'], 'line-opacity': isDark() ? 0.35 : 0.45,
+               'line-width': z(9, 8, 12, 15, 15, 22, 18, 32), 'line-blur': z(9, 5, 12, 9, 15, 12, 18, 18) } }, 'water-name');
+    pmap.addLayer({ id: 'metro-outline', type: 'line', source: 'metro-lines', minzoom: 9, layout: round,
+      paint: { 'line-color': '#1d1b2a', 'line-opacity': 0.9, 'line-width': z(9, 3.8, 12, 7.5, 15, 11, 18, 16) } }, 'water-name');
+    pmap.addLayer({ id: 'metro-casing', type: 'line', source: 'metro-lines', minzoom: 9, layout: round,
+      paint: { 'line-color': '#ffffff', 'line-width': z(9, 2.8, 12, 5.8, 15, 9, 18, 13.5) } }, 'water-name');
+    pmap.addLayer({ id: 'metro-line', type: 'line', source: 'metro-lines', minzoom: 9, layout: round,
+      paint: { 'line-color': ['get', 'color'], 'line-width': z(9, 1.7, 12, 3.6, 15, 6, 18, 8.5) } }, 'water-name');
+    pmap.addLayer({ id: 'metro-shine', type: 'line', source: 'metro-lines', minzoom: 11, layout: round,
+      paint: { 'line-color': '#ffffff', 'line-opacity': 0.45, 'line-width': z(11, 0.8, 15, 1.5, 18, 2.5),
+               'line-offset': z(11, -0.6, 15, -1.2, 18, -2) } }, 'water-name');
   }
   if (A.landmarks && A.landmarks.length && !pmap.getSource('landmarks')) {
     pmap.addSource('landmarks', { type: 'geojson', data: { type: 'FeatureCollection', features: A.landmarks.map((l) => ({
