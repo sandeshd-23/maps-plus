@@ -1,33 +1,52 @@
 // How big things are drawn at each zoom, shared by every map theme. Modelled on Google Maps:
 //  - roads keep shrinking as you zoom out (about half per zoom step), down to hairlines, instead of
 //    stopping at a minimum width; small streets fade out and service lanes disappear
-//  - road outlines (casings) only appear when zoomed in
+//  - road outlines (casings) only appear when zoomed in, EXCEPT highways and main roads: zoomed out to city /
+//    state level those stay bold (gold highways, cream main roads, dark outline) so you can follow them,
+//    (the yellow NH number plates on top are placed by game-overlay.html: updateShields)
 //  - fewer, smaller labels when zoomed out: city names first, then areas, then neighbourhoods and streets
 // Zooms are MapLibre zooms; the pixel map runs one below Google's (MapLibre 12 = Google 13).
-// Exposes window.MapScale = { roadWidth, casingWidth, roadOpacity, casingOpacity, pathWidth, waterEdge,
-//                             glowWidth, routeWidth, labels(colors) }.
+// Exposes window.MapScale = { roadWidth, casingWidth, roadOpacity, casingOpacity, casingColor(base), roadColor(other),
+//                             HIGHWAY, MAIN_ROAD, pathWidth, waterEdge, glowWidth, routeWidth, labels(colors) }.
 (() => {
-  // [zoom, main road, small street] widths in CSS px. Main = primary; small = minor (residential).
-  const FILL = [[9, 0.8, 0.3], [11, 1.4, 0.6], [12, 2, 1], [13, 3.2, 1.6], [14, 5.5, 3], [15, 10, 6], [16, 18, 11], [18, 54, 32]];
-  const CASING = [[12, 2, 1], [13, 4.4, 2.6], [14, 8, 4.8], [15, 13.5, 8.5], [16, 22, 14], [18, 64, 40]];
+  // [zoom, highway, main road, small street] widths in CSS px. Highway = motorway/trunk (NH, ring roads),
+  // main = primary, small = minor (residential). Highways stay clearly visible down to state level.
+  const FILL = [[5, 1.6, 0.6, 0.2], [8, 2.4, 0.9, 0.3], [9, 2.8, 1.1, 0.3], [11, 3.4, 1.9, 0.6], [12, 3.9, 2.4, 1],
+                [13, 4.8, 3.4, 1.6], [14, 6.5, 5.5, 3], [15, 11, 10, 6], [16, 20, 18, 11], [18, 60, 54, 32]];
+  // Zoomed far out, main roads get only a hairline outline so they read as light lines and highways dominate.
+  const CASING = [[5, 3, 1.1, 0], [8, 4, 1.5, 0], [9, 4.4, 1.8, 0], [11, 5.3, 3.2, 1], [12, 5.9, 4.2, 1.6],
+                  [13, 7, 5.4, 2.6], [14, 9, 8, 4.8], [15, 14.5, 13.5, 8.5], [16, 24, 22, 14], [18, 70, 64, 40]];
+  // Zoomed-out colours (below street level, where the pixel road textures take over).
+  const HIGHWAY = '#f3c341', MAIN_ROAD = '#fbf0cc', OUTLINE = '#3a2c22';
 
-  // Per road class: highways a bit wider than primary, secondary a bit narrower, service lanes thin.
-  const perClass = (main, small) => ['match', ['get', 'class'],
-    ['motorway', 'trunk'], +(main * 1.15).toFixed(2), 'primary', main, 'secondary', +(main * 0.85).toFixed(2),
+  // Per road class: secondary a bit narrower than primary, tertiary a bit wider than minor, service lanes thin.
+  const perClass = (hw, main, small) => ['match', ['get', 'class'],
+    ['motorway', 'trunk'], hw, 'primary', main, 'secondary', +(main * 0.8).toFixed(2),
     'tertiary', +(small * 1.25).toFixed(2), 'service', +(small * 0.6).toFixed(2), small];
   // Zoom interpolation has to be the outermost expression, so the class choice sits inside each stop.
-  const byZoom = (stops) => ['interpolate', ['exponential', 1.5], ['zoom'], ...stops.flatMap(([z, a, b]) => [z, perClass(a, b)])];
+  const byZoom = (stops) => ['interpolate', ['exponential', 1.5], ['zoom'], ...stops.flatMap(([z, h, a, b]) => [z, perClass(h, a, b)])];
+  // Fill colour: gold highways, cream main roads, `other` for the rest.
+  const roadColor = (other) => ['match', ['get', 'class'], ['motorway', 'trunk'], HIGHWAY, 'primary', MAIN_ROAD, other];
+  // Outline colour: dark when zoomed out (so roads pop on grass), the theme's own colour up close.
+  const casingColor = (base) => ['interpolate', ['linear'], ['zoom'], 13, OUTLINE, 14, base];
 
   const roadWidth = () => byZoom(FILL);
   const casingWidth = () => byZoom(CASING);
   // Small streets fade in around Google zoom 13, service lanes around 14.5.
   const roadOpacity = () => ['interpolate', ['linear'], ['zoom'],
+    8, ['match', ['get', 'class'], ['motorway', 'trunk', 'primary'], 1, 0],
+    9, ['match', ['get', 'class'], ['motorway', 'trunk', 'primary'], 1, 'secondary', 0.6, 0],
+    10, ['match', ['get', 'class'], ['minor', 'service'], 0, 'tertiary', 0.5, 1],
     11, ['match', ['get', 'class'], ['minor', 'service'], 0, 1],
     12, ['match', ['get', 'class'], 'minor', 0.75, 'service', 0, 1],
     13, ['match', ['get', 'class'], 'service', 0, 1],
     14, 1];
+  const MAJOR3 = ['motorway', 'trunk', 'primary'];
   const casingOpacity = () => ['interpolate', ['linear'], ['zoom'],
-    12, 0, 13, ['match', ['get', 'class'], 'service', 0, 0.55], 14, 1];
+    9, ['match', ['get', 'class'], MAJOR3, 0.95, 0],
+    11, ['match', ['get', 'class'], MAJOR3, 0.95, 'secondary', 0.5, 0],
+    12, ['match', ['get', 'class'], MAJOR3, 0.95, 'secondary', 0.7, 0],
+    13, ['match', ['get', 'class'], MAJOR3, 0.95, 'service', 0, 0.55], 14, 1];
   const pathWidth = () => ['interpolate', ['linear'], ['zoom'], 14, 1, 16, 2.5, 18, 3.5];
   const waterEdge = () => ['interpolate', ['linear'], ['zoom'], 11, 0.5, 14, 1.5, 16, 2];
   const glowWidth = () => ['interpolate', ['exponential', 1.6], ['zoom'], 11, 2, 13, 5, 15, 20, 18, 80];
@@ -75,5 +94,6 @@
     ];
   }
 
-  window.MapScale = { roadWidth, casingWidth, roadOpacity, casingOpacity, pathWidth, waterEdge, glowWidth, routeWidth, labels };
+  window.MapScale = { roadWidth, casingWidth, roadOpacity, casingOpacity, casingColor, roadColor, HIGHWAY, MAIN_ROAD,
+                      pathWidth, waterEdge, glowWidth, routeWidth, labels };
 })();

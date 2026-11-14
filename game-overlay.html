@@ -719,6 +719,14 @@ function addArtLayers() {
       paint: { 'line-color': '#ffd44a', 'line-dasharray': [2, 1.2],
                'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 15, 5, 18, 8] } }, 'water-name');
   }
+  if (!pmap.getSource('shields')) {
+    pmap.addSource('shields', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    pmap.addLayer({ id: 'road-shields', type: 'symbol', source: 'shields', maxzoom: 14,
+      layout: { 'text-field': ['get', 'ref'], 'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 7, 8, 13, 10],
+                'text-padding': 6, 'text-letter-spacing': 0.04, 'symbol-sort-key': ['get', 'rank'] },
+      paint: { 'text-color': '#202020', 'text-halo-color': MapScale.HIGHWAY, 'text-halo-width': 3 } }, 'water-name');
+    updateShields();
+  }
   if (!pmap.getSource('hazards')) {
     pmap.addSource('hazards', { type: 'geojson', data: Hazards.geojson() });
     pmap.addLayer({ id: 'hazards', type: 'symbol', source: 'hazards', minzoom: 11,
@@ -727,6 +735,51 @@ function addArtLayers() {
   }
   applyIconFilter();
 }
+
+// Highway number plates (NH44, NH948...) when zoomed out, like Google's shields: walk each highway on screen and
+// drop a plate every ~240 px, without repeating the same number too close together. Redone when the map settles.
+let shieldTimer = 0;
+function updateShields() {
+  const src = pmap.getSource('shields'); if (!src) return;
+  const z = pmap.getZoom(), out = [];
+  if (z >= 7 && z < 14) {
+    const W = pmap.getContainer().clientWidth, H = pmap.getContainer().clientHeight, placed = [];
+    let feats = [];
+    try { feats = pmap.querySourceFeatures('omt', { sourceLayer: 'transportation_name' }); } catch (_) {}
+    feats.forEach((f) => {
+      const p = f.properties;
+      if (!p.ref || !/^(motorway|trunk)$/.test(p.class)) return;
+      const ref = String(p.ref).split(';')[0];
+      const lines = f.geometry.type === 'LineString' ? [f.geometry.coordinates] : f.geometry.type === 'MultiLineString' ? f.geometry.coordinates : [];
+      lines.forEach((line) => {
+        // Roads come cut into pieces at map-square edges: put the first plate mid-way on short pieces.
+        const pts = line.map((c) => pmap.project(c));
+        let len = 0; for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+        if (len < 50) return;
+        let prev = null, walked = 0, next = len < 240 ? len / 2 : 120;
+        pts.forEach((pt) => {
+          if (prev) {
+            const seg = Math.hypot(pt.x - prev.x, pt.y - prev.y);
+            while (walked + seg >= next) {
+              const k = (next - walked) / seg, x = prev.x + (pt.x - prev.x) * k, y = prev.y + (pt.y - prev.y) * k;
+              next += 240;
+              if (x < 20 || y < 20 || x > W - 20 || y > H - 20) continue;
+              if (placed.some((q) => q.ref === ref ? Math.hypot(q.x - x, q.y - y) < 200 : Math.hypot(q.x - x, q.y - y) < 40)) continue;
+              placed.push({ ref, x, y });
+              const ll = pmap.unproject([x, y]);
+              out.push({ type: 'Feature', properties: { ref, rank: /^NH\d{1,2}$/.test(ref) ? 0 : 1 }, geometry: { type: 'Point', coordinates: [ll.lng, ll.lat] } });
+            }
+            walked += seg;
+          }
+          prev = pt;
+        });
+      });
+    });
+  }
+  src.setData({ type: 'FeatureCollection', features: out });
+}
+pmap.on('moveend', () => { clearTimeout(shieldTimer); shieldTimer = setTimeout(updateShields, 300); });
+pmap.on('sourcedata', (e) => { if (e.sourceId === 'omt' && e.isSourceLoaded) { clearTimeout(shieldTimer); shieldTimer = setTimeout(updateShields, 300); } });
 
 // Every new style: add textures + art, then put the route back on top (keeps an active route across switches).
 pmap.on('style.load', () => {

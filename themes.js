@@ -31,7 +31,10 @@
     if (m) return [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]];
     return null;
   }
+  // Zoomed-out highways / main roads keep their own night colours so they still stand out after dark.
+  const NIGHT_ROADS = { '#f3c341': '#d49a2e', '#f0b030': '#d49a2e', '#fbf0cc': '#a3a1b6', '#f7d77a': '#a3a1b6', '#3a2c22': '#0b0d18' };
   function nightColor(s) {
+    if (typeof s === 'string' && NIGHT_ROADS[s.toLowerCase()]) return NIGHT_ROADS[s.toLowerCase()];
     const c = parseColor(s); if (!c) return s;
     const [r, g, b] = nightRGB(c[0], c[1], c[2]);
     return `rgba(${r},${g},${b},${+c[3].toFixed(3)})`;
