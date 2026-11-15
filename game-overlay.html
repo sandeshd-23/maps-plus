@@ -662,21 +662,23 @@ function addArtLayers() {
     // Like Google: the most important places show from much further out, the rest as you zoom in.
     // (Zoom numbers are the pixel map's; Google's are one higher. Text uses the tile zoom, one lower again.)
     const TIER = { iisc: 1, airport: 1, 'vidhana-soudha': 1, 'bangalore-palace': 1, 'lalbagh-glass-house': 1,
-                   'iskcon-bangalore': 1, 'nandi-hills': 1, 'bannerghatta-zoo': 1,
-                   'commercial-street': 3, 'gavi-gangadhareshwara': 3 };          // everything else: tier 2
+                   'nandi-hills': 1, 'bannerghatta-zoo': 1,
+                   'iskcon-bangalore': 3, 'commercial-street': 3, 'gavi-gangadhareshwara': 3 };   // everything else: tier 2
     pmap.addSource('landmarks', { type: 'geojson', data: { type: 'FeatureCollection', features: A.landmarks.map((l) => ({
       type: 'Feature', properties: { id: l.id, name: l.name, tier: TIER[l.id] || 2 },
       geometry: { type: 'Point', coordinates: [l.lng, l.lat] } })) } });
     const byTier = (t1, t2, t3) => ['match', ['get', 'tier'], 1, t1, 2, t2, t3];
+    const big = (size, k) => ['*', ['match', ['get', 'id'], 'airport', k, 1], size];
     const NAME = ['upcase', ['get', 'name']];
     pmap.addLayer({ id: 'landmarks', type: 'symbol', source: 'landmarks', minzoom: 9.5,
       layout: {
         'icon-image': ['concat', 'lm-', ['get', 'id']], 'icon-anchor': 'bottom',
         'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        // Zoomed out a little bigger than before; the airport much bigger (it's a huge place).
         'icon-size': ['interpolate', ['linear'], ['zoom'],
-          9.5, byTier(0.2, 0, 0), 11.95, byTier(0.26, 0, 0), 12, byTier(0.27, 0.22, 0),
-          12.95, byTier(0.31, 0.28, 0), 13, byTier(0.33, 0.3, 0.26), 15, byTier(0.75, 0.7, 0.7),
-          17, byTier(1.25, 1.2, 1.2), 19, 2],
+          9.5, big(byTier(0.27, 0, 0), 2.8), 11.95, big(byTier(0.34, 0, 0), 2.7), 12, big(byTier(0.35, 0.3, 0), 2.5),
+          12.95, big(byTier(0.4, 0.36, 0), 2.3), 13, big(byTier(0.42, 0.38, 0.34), 2.2), 15, big(byTier(0.8, 0.75, 0.75), 1.7),
+          17, big(byTier(1.25, 1.2, 1.2), 1.3), 19, 2],
         'text-field': ['step', ['zoom'], '', 10, ['case', ['==', ['get', 'tier'], 1], NAME, ''],
                        12.5, ['case', ['<=', ['get', 'tier'], 2], NAME, ''], 14.5, NAME],
         'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 10, 17, 11],
@@ -983,7 +985,7 @@ const savedIcon = (type, scale = 2) => {
 };
 function renderSavedMarkers() {
   savedMarkers.forEach((m) => m.remove());
-  savedMarkers = saved.map((p) => new maplibregl.Marker({ element: savedIcon(p.type), anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(pmap));
+  savedMarkers = saved.map((p) => new maplibregl.Marker({ element: savedIcon(p.type, 1.4), anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(pmap));
 }
 function persistSaved() { store.set('mapsplus.saved', JSON.stringify(saved)); renderSavedMarkers(); renderPlaces(); }
 function saveDest(type) {
@@ -993,6 +995,23 @@ function saveDest(type) {
                placeId: destPlaceId || undefined });
   persistSaved(); sfx('save'); toast(`SAVED AS ${type.toUpperCase()}!`);
 }
+// A saved place picked from PLACES or tapped on the map: same "Go to ...? Press GO!" prompt as any place.
+function selectSaved(p, moveMap) {
+  const label = p.type === 'favorite' ? p.name : `${p.type.toUpperCase()}${p.name && p.name.toUpperCase() !== p.type.toUpperCase() ? ' (' + p.name + ')' : ''}`;
+  setDestination({ lat: p.lat, lng: p.lng }, label, p.placeId);
+  sfx('click');
+  if (moveMap && gmap) gmap.panTo({ lat: p.lat, lng: p.lng });
+}
+// Saved pin under a tap? Pins stand on their point, so the clickable area is above it.
+function savedAt(latLng) {
+  const pt = pmap.project([latLng.lng, latLng.lat]);
+  let best = null, bestD = Infinity;
+  saved.forEach((p) => {
+    const q = pmap.project([p.lng, p.lat]), dx = pt.x - q.x, dy = pt.y - q.y;
+    if (Math.abs(dx) <= 18 && dy <= 4 && dy >= -44) { const d = Math.hypot(dx, dy + 20); if (d < bestD) { bestD = d; best = p; } }
+  });
+  return best;
+}
 function renderPlaces() {
   const list = $('savedList');
   if (!saved.length) {
@@ -1001,11 +1020,11 @@ function renderPlaces() {
     const order = { home: 0, work: 1, favorite: 2 };
     list.replaceChildren(...[...saved].sort((a, b) => order[a.type] - order[b.type]).map((p) => {
       const row = document.createElement('div'); row.className = 'row';
-      row.appendChild(savedIcon(p.type, 2));
+      row.appendChild(savedIcon(p.type, 1.1));
       const t = document.createElement('div'); t.className = 'grow';
       t.innerHTML = `${esc(p.name)}<small>${esc(p.type.toUpperCase())}</small>`;
       const go = document.createElement('button'); go.type = 'button'; go.className = 'mini'; go.textContent = 'GO';
-      go.onclick = () => { $('placesPanel').hidden = true; setDestination({ lat: p.lat, lng: p.lng }, p.name, p.placeId); findRoute(); };
+      go.onclick = () => { $('placesPanel').hidden = true; selectSaved(p, true); };
       const del = document.createElement('button'); del.type = 'button'; del.className = 'mini'; del.textContent = 'X';
       del.setAttribute('aria-label', 'Delete ' + p.name);
       del.onclick = () => { saved = saved.filter((x) => x.id !== p.id); persistSaved(); };
@@ -2469,6 +2488,8 @@ window.initMap = () => {
     hideResults();
     const pos = { lat: e.latLng.lat(), lng: e.latLng.lng() };
     if (Date.now() < suppressClickUntil) { if (e.placeId) e.stop(); return; }   // that was a long-press
+    const pin = savedAt(pos);           // your HOME / WORK / favourite pins come first
+    if (pin) { if (e.placeId) e.stop(); selectSaved(pin); return; }
     const icon = iconAt(pos);           // one of our pixel icons: that's what you see, so it wins
     if (icon && icon.layer.id === 'hazards') { if (e.placeId) e.stop(); openHazardMenu(pos, Hazards.get(icon.properties.id)); return; }
     if (icon) { if (e.placeId) e.stop(); selectIconPlace(icon); return; }
