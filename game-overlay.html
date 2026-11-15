@@ -659,15 +659,29 @@ function addArtLayers() {
                'line-offset': z(11, -0.6, 15, -1.2, 18, -2) } }, 'water-name');
   }
   if (A.landmarks && A.landmarks.length && !pmap.getSource('landmarks')) {
+    // Like Google: the most important places show from much further out, the rest as you zoom in.
+    // (Zoom numbers are the pixel map's; Google's are one higher. Text uses the tile zoom, one lower again.)
+    const TIER = { iisc: 1, airport: 1, 'vidhana-soudha': 1, 'bangalore-palace': 1, 'lalbagh-glass-house': 1,
+                   'iskcon-bangalore': 1, 'nandi-hills': 1, 'bannerghatta-zoo': 1,
+                   'commercial-street': 3, 'gavi-gangadhareshwara': 3 };          // everything else: tier 2
     pmap.addSource('landmarks', { type: 'geojson', data: { type: 'FeatureCollection', features: A.landmarks.map((l) => ({
-      type: 'Feature', properties: { id: l.id, name: l.name }, geometry: { type: 'Point', coordinates: [l.lng, l.lat] } })) } });
-    pmap.addLayer({ id: 'landmarks', type: 'symbol', source: 'landmarks', minzoom: 13,
+      type: 'Feature', properties: { id: l.id, name: l.name, tier: TIER[l.id] || 2 },
+      geometry: { type: 'Point', coordinates: [l.lng, l.lat] } })) } });
+    const byTier = (t1, t2, t3) => ['match', ['get', 'tier'], 1, t1, 2, t2, t3];
+    const NAME = ['upcase', ['get', 'name']];
+    pmap.addLayer({ id: 'landmarks', type: 'symbol', source: 'landmarks', minzoom: 9.5,
       layout: {
         'icon-image': ['concat', 'lm-', ['get', 'id']], 'icon-anchor': 'bottom',
         'icon-allow-overlap': true, 'icon-ignore-placement': true,
-        'icon-size': ['interpolate', ['exponential', 1.5], ['zoom'], 13, 0.32, 15, 0.7, 17, 1.2, 19, 2],
-        'text-field': ['step', ['zoom'], '', 15.5, ['upcase', ['get', 'name']]], 'text-font': ['Noto Sans Bold'],
-        'text-size': 11, 'text-anchor': 'top', 'text-offset': [0, 0.3], 'text-optional': true,
+        'icon-size': ['interpolate', ['linear'], ['zoom'],
+          9.5, byTier(0.2, 0, 0), 11.95, byTier(0.26, 0, 0), 12, byTier(0.27, 0.22, 0),
+          12.95, byTier(0.31, 0.28, 0), 13, byTier(0.33, 0.3, 0.26), 15, byTier(0.75, 0.7, 0.7),
+          17, byTier(1.25, 1.2, 1.2), 19, 2],
+        'text-field': ['step', ['zoom'], '', 10, ['case', ['==', ['get', 'tier'], 1], NAME, ''],
+                       12.5, ['case', ['<=', ['get', 'tier'], 2], NAME, ''], 14.5, NAME],
+        'text-font': ['Noto Sans Bold'], 'text-size': ['interpolate', ['linear'], ['zoom'], 10, 8, 14, 10, 17, 11],
+        'text-anchor': 'top', 'text-offset': [0, 0.3], 'text-optional': true, 'text-max-width': 9,
+        'symbol-sort-key': ['get', 'tier'],
       },
       paint: { 'text-color': '#ffffff', 'text-halo-color': '#202030', 'text-halo-width': 2 } }, 'water-name');
   }

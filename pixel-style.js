@@ -40,23 +40,24 @@
   const S = window.MapScale;   // road widths, fading and labels per zoom (map-scale.js)
   const ROADS = ['motorway','trunk','primary','secondary','tertiary','minor','service'];
   const FONT = ['Noto Sans Bold'];
+  const AVG = Object.fromEntries(['pave', 'grass', 'tree', 'water'].map((k) => [k, S.avgColor(textures[k])]));
 
   const style = {
     version: 8,
     glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
     sources: { omt: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' } },
     layers: [
-      { id: 'bg-solid', type: 'background', paint: { 'background-color': '#e6dcb0' } },
-      { id: 'bg', type: 'background', paint: { 'background-pattern': 'pave' } },
-      { id: 'landcover-grass', type: 'fill', source: 'omt', 'source-layer': 'landcover',
-        filter: ['in', ['get', 'class'], ['literal', ['grass', 'farmland']]], paint: { 'fill-pattern': 'grass' } },
-      { id: 'park', type: 'fill', source: 'omt', 'source-layer': 'park', paint: { 'fill-pattern': 'grass' } },
-      // Woods: tree texture when zoomed out; grass when zoomed in, where trees.js plants real-size trees.
-      { id: 'landcover-wood-far', type: 'fill', source: 'omt', 'source-layer': 'landcover', maxzoom: 15,
-        filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': 'tree' } },
+      // Textures only up close; zoomed out, each is its average colour (MapScale.texturedFill).
+      ...S.texturedBackground('pave', AVG.pave),
+      ...S.texturedFill({ id: 'landcover-grass', type: 'fill', source: 'omt', 'source-layer': 'landcover',
+        filter: ['in', ['get', 'class'], ['literal', ['grass', 'farmland']]], paint: { 'fill-pattern': 'grass' } }, AVG.grass),
+      ...S.texturedFill({ id: 'park', type: 'fill', source: 'omt', 'source-layer': 'park', paint: { 'fill-pattern': 'grass' } }, AVG.grass),
+      // Woods: tree texture; grass when zoomed right in, where trees.js plants real-size trees.
+      ...S.texturedFill({ id: 'landcover-wood-far', type: 'fill', source: 'omt', 'source-layer': 'landcover', maxzoom: 15,
+        filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': 'tree' } }, AVG.tree),
       { id: 'landcover-wood', type: 'fill', source: 'omt', 'source-layer': 'landcover', minzoom: 15,
         filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': 'grass' } },
-      { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-pattern': 'water' } },
+      ...S.texturedFill({ id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-pattern': 'water' } }, AVG.water),
       { id: 'water-edge', type: 'line', source: 'omt', 'source-layer': 'water',
         paint: { 'line-color': '#2c5d8f', 'line-width': S.waterEdge() } },
       { id: 'road-casing', type: 'line', source: 'omt', 'source-layer': 'transportation',

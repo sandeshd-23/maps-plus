@@ -54,6 +54,32 @@
   const routeWidth = (a, b, c) => ['interpolate', ['linear'], ['zoom'],
     10, +(a * 0.45).toFixed(2), 12, +(a * 0.75).toFixed(2), 15, b, 18, c];
 
+  // Ground textures (grass with flowers, forest clumps, water waves, paving) are drawn at a fixed size on screen,
+  // so zoomed out a single flower would cover a whole neighbourhood. Zoomed out: the texture's average colour;
+  // the texture fades in between Google zoom 14 and 15 (MapLibre 13 -> 14).
+  const TEX_FROM = 13, TEX_FULL = 14;
+  const textureFade = () => ['interpolate', ['linear'], ['zoom'], TEX_FROM, 0, TEX_FULL, 1];
+  function avgColor(img) {
+    if (!img || !img.data) return '#808080';
+    const d = img.data; let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 128) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    if (!n) return '#808080';
+    const h = (v) => Math.round(v / n).toString(16).padStart(2, '0');
+    return '#' + h(r) + h(g) + h(b);
+  }
+  // One textured fill layer -> [plain-colour twin for zoomed out, the textured layer fading in].
+  function texturedFill(layer, color) {
+    if ((layer.minzoom || 0) >= TEX_FULL) return [layer];          // only shown up close anyway
+    const { paint, ...rest } = layer;
+    const solid = { ...rest, id: layer.id + '-solid', maxzoom: Math.min(layer.maxzoom || 24, TEX_FULL), paint: { 'fill-color': color } };
+    return [solid, { ...layer, paint: { ...paint, 'fill-opacity': textureFade() } }];
+  }
+  // Background: plain colour underneath, paving / grass texture fading in on top.
+  const texturedBackground = (pattern, color) => [
+    { id: 'bg-solid', type: 'background', paint: { 'background-color': color } },
+    { id: 'bg', type: 'background', paint: { 'background-pattern': pattern, 'background-opacity': textureFade() } },
+  ];
+
   const size = (...stops) => ['interpolate', ['linear'], ['zoom'], ...stops];
   const NAME = ['upcase', ['coalesce', ['get', 'name'], '']];
 
@@ -94,6 +120,7 @@
     ];
   }
 
-  window.MapScale = { roadWidth, casingWidth, roadOpacity, casingOpacity, casingColor, roadColor, HIGHWAY, MAIN_ROAD,
+  window.MapScale = { avgColor, texturedFill, texturedBackground, textureFade,
+                      roadWidth, casingWidth, roadOpacity, casingOpacity, casingColor, roadColor, HIGHWAY, MAIN_ROAD,
                       pathWidth, waterEdge, glowWidth, routeWidth, labels };
 })();

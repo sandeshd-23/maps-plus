@@ -142,17 +142,17 @@
       glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
       sources: { omt: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' } },
       layers: [
-        { id: 'bg-solid', type: 'background', paint: { 'background-color': t.ground } },
-        { id: 'bg', type: 'background', paint: { 'background-pattern': P('bg') } },
-        { id: 'landcover-grass', type: 'fill', source: 'omt', 'source-layer': 'landcover',
-          filter: ['in', ['get', 'class'], ['literal', ['grass', 'farmland']]], paint: { 'fill-pattern': P('park') } },
-        { id: 'park', type: 'fill', source: 'omt', 'source-layer': 'park', paint: { 'fill-pattern': P('park') } },
-        // Woods: forest texture when zoomed out; grass when zoomed in (trees.js then plants real-size trees).
-        { id: 'landcover-wood-far', type: 'fill', source: 'omt', 'source-layer': 'landcover', maxzoom: TREE_ZOOM,
-          filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': P('forest') } },
+        // Textures only up close; zoomed out, each is its average colour (MapScale.texturedFill).
+        ...S.texturedBackground(P('bg'), avg.bg),
+        ...S.texturedFill({ id: 'landcover-grass', type: 'fill', source: 'omt', 'source-layer': 'landcover',
+          filter: ['in', ['get', 'class'], ['literal', ['grass', 'farmland']]], paint: { 'fill-pattern': P('park') } }, avg.park),
+        ...S.texturedFill({ id: 'park', type: 'fill', source: 'omt', 'source-layer': 'park', paint: { 'fill-pattern': P('park') } }, avg.park),
+        // Woods: forest texture; grass when zoomed right in (trees.js then plants real-size trees).
+        ...S.texturedFill({ id: 'landcover-wood-far', type: 'fill', source: 'omt', 'source-layer': 'landcover', maxzoom: TREE_ZOOM,
+          filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': P('forest') } }, avg.forest),
         { id: 'landcover-wood', type: 'fill', source: 'omt', 'source-layer': 'landcover', minzoom: TREE_ZOOM,
           filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-pattern': P('park') } },
-        { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-pattern': P('water') } },
+        ...S.texturedFill({ id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-pattern': P('water') } }, avg.water),
         { id: 'water-edge', type: 'line', source: 'omt', 'source-layer': 'water',
           paint: { 'line-color': t.waterEdge, 'line-width': S.waterEdge() } },
         { id: 'road-casing', type: 'line', source: 'omt', 'source-layer': 'transportation',
@@ -200,7 +200,10 @@
     await Promise.all([...keys].map(async (k) => { sheets[k] = await loadSheet(k); }));
     const images = {};
     Object.entries(t.tex).forEach(([id, grid]) => { images['k-' + t.id + '-' + id] = compose(grid, sheets); });
-    const avg = { major: averageColor(images['k-' + t.id + '-roadMajor']), minor: averageColor(images['k-' + t.id + '-roadMinor']) };
+    const img = (id) => images['k-' + t.id + '-' + id];
+    const avg = { major: averageColor(img('roadMajor')), minor: averageColor(img('roadMinor')),
+                  bg: averageColor(img('bg')), park: averageColor(img('park')), forest: averageColor(img('forest')),
+                  water: averageColor(img('water')) };
     const trees = t.trees.map((ref) => compose([[[ref]]], sheets));   // single 16x16 tree sprites, transparent
     return { style: styleFor(t, avg), images, trees, player: t.player ? playerFrom(t.player, sheets) : null };
   }
