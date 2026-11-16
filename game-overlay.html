@@ -297,6 +297,9 @@
   .heading { width:96px; height:96px; pointer-events:none; }
   .heading canvas { display:block; margin:0 auto; }
   .player { width:36px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
+  /* Moving: a little 2-step pixel bounce (uses 'translate', so it doesn't fight the facing / tilt transform). */
+  .avatar.moving > canvas { animation:ride var(--ride, .45s) steps(2) infinite; }
+  @keyframes ride { 50% { translate:0 -2px; } }
   /* The pulse lives on an inner box: MapLibre positions the outer element with `transform`,
      so animating `transform` on the outer element would fight with it. */
   .target-wrap { width:22px; height:22px; }
@@ -531,6 +534,7 @@ function setHeading(deg, src) {
   const now = Date.now();
   if (src === 'gps') myHeading.gpsAt = now;
   else if (now - myHeading.gpsAt < 5000) return;          // moving: the GPS course wins over the compass
+  if (src === 'gps' && glide.raf) return;                 // the glide below turns the arrow smoothly
   if (now - myHeading.t < 80 && src !== 'gps') return;
   myHeading.deg = (deg + 360) % 360; myHeading.src = src; myHeading.t = now;
   headingMarker.setRotation(myHeading.deg);
@@ -538,11 +542,16 @@ function setHeading(deg, src) {
   updateFacing();
 }
 // Face left / right by where the heading points ON SCREEN (the map may be turned, e.g. heading-up driving).
+// rel = where the heading points on screen, clockwise from straight up. Side-view sprites face left / right and
+// tilt their nose up to 30 degrees toward the road (straight up the screen in heading-up driving).
+let facingTilt = 0;
 function updateFacing() {
   if (myHeading.deg == null || previewing) return;
   const rel = ((myHeading.deg - (window.__mapBearing || 0)) % 360 + 360) % 360;
   const want = rel > 15 && rel < 165 ? 'right' : rel > 195 && rel < 345 ? 'left' : facing;   // keep it near straight up/down
-  if (want !== facing) { facing = want; Avatars.face(player.getElement(), facing); }
+  const r = rel * Math.PI / 180, up = Math.atan2(Math.cos(r), Math.abs(Math.sin(r))) * 180 / Math.PI;   // above horizontal
+  const tilt = Math.round(Math.max(-30, Math.min(30, up)) / 10) * 10;                       // in 10-degree pixel steps
+  if (want !== facing || tilt !== facingTilt) { facing = want; facingTilt = tilt; Avatars.face(player.getElement(), facing, tilt); }
 }
 // The phone's compass (works on Android; iPhones need a permission tap, so they use GPS only).
 function onOrientation(e) {
@@ -556,11 +565,85 @@ function onOrientation(e) {
 if ('ondeviceorientationabsolute' in window) addEventListener('deviceorientationabsolute', onOrientation);
 else addEventListener('deviceorientation', onOrientation);
 
+// ---------- smooth movement ----------
+// GPS gives one position about every second, so the character and map used to jump. Now, every frame:
+//  - your character glides toward the latest position, and keeps going at your speed for up to 1.2 s if the next
+//    one is late (a short prediction), so it doesn't stop and start
+//  - while you're on the route, positions are snapped onto the route line (no GPS wobble), like Google Maps
+//  - the camera follows the glided position, and in heading-up driving it turns smoothly toward the road ahead
+//  - a big GPS jump (or coming back from the background) snaps straight there instead of sliding across the map
+const glide = { disp: null, fix: null, fixT: 0, speed: 0, along: null, onRoute: false, course: null, head: null,
+                raf: 0, last: 0, routeLen: 0, cam: '' };
+function glideFix(pos, p, course) {
+  const now = performance.now();
+  let v = p.coords.speed != null && p.coords.speed >= 0 ? p.coords.speed : null;
+  if (v == null && glide.fix) { const dt = (now - glide.fixT) / 1000; if (dt > 0.3) v = Math.min(40, Geo.dist(glide.fix, pos) / dt); }
+  glide.speed = v == null ? glide.speed * 0.5 : glide.speed * 0.3 + v * 0.7;
+  let target = pos; glide.onRoute = false; glide.along = null;
+  if (nav.active && routeCoords.length > 1) {
+    const on = Geo.toLine(pos, routeCoords);
+    if (on.dist < 30) { glide.onRoute = true; glide.along = on.along; const s = Geo.atDistance(routeCoords, on.along); target = { lat: s.lat, lng: s.lng }; }
+  }
+  glide.fix = target; glide.fixT = now;
+  if (course != null) glide.course = course;
+  if (!glide.disp || document.hidden || Geo.dist(glide.disp, target) > 120) {   // first fix / long jump: snap
+    glide.disp = { lat: target.lat, lng: target.lng };
+    movePlayer(target.lng, target.lat);
+  }
+  kickGlide();
+}
+function kickGlide() { if (!glide.raf && glide.disp) { glide.last = 0; glide.raf = requestAnimationFrame(glideFrame); } }
+// Where you probably are right now: the last position, moved on at your speed (max 1.2 s), along the route if on it.
+function predicted(now) {
+  const dt = Math.min((now - glide.fixT) / 1000, 1.2), ahead = glide.speed > 0.7 ? glide.speed * dt : 0;
+  if (glide.onRoute && glide.along != null && routeCoords.length > 1) {
+    const a = Math.min(glide.along + ahead, glide.routeLen || Infinity), s = Geo.atDistance(routeCoords, a);
+    return { lat: s.lat, lng: s.lng, along: a };
+  }
+  if (ahead && glide.course != null) {
+    const b = glide.course * Math.PI / 180, f = glide.fix;
+    return { lat: f.lat + ahead * Math.cos(b) / 111320, lng: f.lng + ahead * Math.sin(b) / (111320 * Math.cos(f.lat * Math.PI / 180)) };
+  }
+  return glide.fix;
+}
+function glideFrame(now) {
+  glide.raf = 0;
+  if (previewing || !glide.disp || !glide.fix) return;
+  const dtF = glide.last ? Math.min(0.1, (now - glide.last) / 1000) : 0.016; glide.last = now;
+  const tgt = predicted(now), k = 1 - Math.exp(-dtF / 0.22);        // ease in ~0.2 s: smooth, never far behind
+  glide.disp.lat += (tgt.lat - glide.disp.lat) * k;
+  glide.disp.lng += (tgt.lng - glide.disp.lng) * k;
+  movePlayer(glide.disp.lng, glide.disp.lat);
+  const moving = glide.speed > 0.7;
+  // Which way: the road ~25 m ahead when on the route (steady through bends), else the GPS course.
+  let hd = null;
+  if (glide.onRoute && tgt.along != null) hd = Geo.atDistance(routeCoords, Math.min(tgt.along + 25, glide.routeLen)).bearing;
+  else if (moving) hd = glide.course;
+  if (hd != null) {
+    const turn = glide.head == null ? 0 : ((hd - glide.head + 540) % 360) - 180;
+    glide.head = glide.head == null ? hd : (glide.head + turn * (1 - Math.exp(-dtF / 0.45)) + 360) % 360;
+    myHeading.deg = glide.head; myHeading.gpsAt = Date.now();
+    headingMarker.setRotation(glide.head); headingEl.style.visibility = '';
+    updateFacing();
+  }
+  if (gmap && nav.active && nav.follow) {                             // camera rides along
+    const heading = drive.active ? (drive.northUp ? 0 : (glide.head != null ? glide.head : drive.heading)) : undefined;
+    const cam = glide.disp.lat.toFixed(7) + ',' + glide.disp.lng.toFixed(7) + ',' + (heading == null ? '' : heading.toFixed(1));
+    if (cam !== glide.cam) { glide.cam = cam; gmap.moveCamera(heading == null ? { center: glide.disp } : { center: glide.disp, heading }); }
+  }
+  const el = player.getElement();
+  el.classList.toggle('moving', moving);
+  el.style.setProperty('--ride', glide.speed > 8 ? '.25s' : glide.speed > 3 ? '.35s' : '.5s');
+  const gap = Geo.dist(glide.disp, tgt);
+  if (moving || gap > 0.3 || (nav.active && nav.follow && drive.active)) glide.raf = requestAnimationFrame(glideFrame);
+}
+
 // ---------- route behind you disappears ----------
 // While navigating, the part of the route you've already covered is removed (like Google Maps).
 let shownFeats = null, featStart = [], featLen = [], trimmedAt = 0;
 function prepareTrim() {
   shownFeats = null; trimmedAt = 0; featStart = []; featLen = [];
+  glide.routeLen = Geo.length(routeCoords);
   let at = 0;
   routeFeats.forEach((f) => { const L = Geo.length(f.geometry.coordinates); featStart.push(at); featLen.push(L); at += L; });
 }
@@ -600,7 +683,7 @@ function refreshAvatar() {
   setPlayerSprite(el);
 }
 function faceToward(lng) {
-  facing = lng < player.getLngLat().lng ? 'left' : 'right';
+  facing = lng < player.getLngLat().lng ? 'left' : 'right'; facingTilt = 0;
   Avatars.face(player.getElement(), facing);
 }
 function faceBearing(deg) {
@@ -1760,7 +1843,6 @@ function onFix(p) {
   if (previewing) return;
   const pos = { lat: p.coords.latitude, lng: p.coords.longitude };
   const acc = p.coords.accuracy || 999, t = p.timestamp || Date.now();
-  movePlayer(pos.lng, pos.lat);
   explore(pos); rememberPos(pos);
   // Direction of travel: the GPS course when moving, else the bearing from the last good fix.
   let course = p.coords.heading != null && !isNaN(p.coords.heading) && (p.coords.speed || 0) > 1 ? p.coords.heading : null;
@@ -1775,6 +1857,7 @@ function onFix(p) {
     }
   }
   if (course != null && (p.coords.speed == null || p.coords.speed > 0.8)) setHeading(course, 'gps');
+  glideFix(pos, p, course);            // your character glides there (and keeps going) instead of jumping
   if (acc < 50) lastFix = { pos, t };
   if (nav.active) { Trips.point(pos, acc, t); navUpdate(pos, p, course); }
   else if (course != null && (p.coords.speed || 0) > 3) {      // riding around without a route
@@ -1810,8 +1893,7 @@ function arrive() {
 }
 $('arriveBtn').onclick = arrive;
 function navUpdate(pos, p, course) {
-  if (drive.active) { if (course != null) drive.heading = course; driveCamera(pos, drive.heading); }
-  else if (nav.follow && gmap) gmap.panTo(pos);
+  if (course != null) drive.heading = course;            // the camera itself follows the glide, every frame
   const toDest = dest ? Geo.dist(pos, dest) : Infinity;
   if (toDest < 30) { arrive(); return; }
   $('arriveBtn').hidden = toDest > 150;                 // close by (parking, gate...): let me say I'm here
@@ -1921,6 +2003,7 @@ function updateDriveUI(pos, p, silent) {
 }
 // Glide the camera to you over ~1 s (GPS updates about once a second), turning the short way round.
 function driveCamera(pos, heading) {
+  if (glide.disp && nav.active) { nav.follow = true; kickGlide(); return; }   // the glide moves the camera smoothly
   if (!gmap || !nav.follow) return;
   if (drive.northUp) heading = 0;
   cancelAnimationFrame(drive.tween);

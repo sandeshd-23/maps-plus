@@ -198,9 +198,12 @@
     return wrap(draw(p[modeId].sprite, p[modeId].colors));
   }
 
-  // Turn the avatar to face left or right (the outer element is positioned by the map, so flip the inner canvas).
-  function face(el, dir) {
-    const c = el && el.firstChild; if (c) c.style.transform = dir === 'left' ? 'scaleX(-1)' : '';
+  // Turn the avatar to face left or right, and tilt its nose up / down (degrees) toward where the road goes on
+  // screen. The outer element is positioned by the map, so flip / tilt the inner canvas.
+  function face(el, dir, tilt = 0) {
+    const c = el && el.firstChild; if (!c) return;
+    c.style.transformOrigin = 'center 85%';
+    c.style.transform = (dir === 'left' ? 'scaleX(-1) ' : '') + (tilt ? `rotate(${-tilt}deg)` : '');
   }
 
   window.Avatars = { make, face, THEMES: Object.keys(P) };
