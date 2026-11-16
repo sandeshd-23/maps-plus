@@ -281,6 +281,17 @@
                 font:11px 'Press Start 2P', monospace; cursor:pointer; background:var(--btn-on); color:#202020;
                 animation:pop .3s steps(3), arriveGlow 1.2s steps(2) infinite; }
   .arrive-btn[hidden] { display:none; }
+  /* Route choices (2-3 routes from Google, scored for big roads and your bad-road pins) */
+  .route-choices { position:absolute; left:12px; right:12px; bottom:calc(var(--google-bar) + 100px); z-index:6; max-width:640px;
+                   padding:6px; display:flex; flex-direction:column; gap:5px; max-height:34vh; overflow:auto; }
+  .route-choices[hidden] { display:none; }
+  .route-choices .alt { text-align:left; cursor:pointer; padding:7px 8px; font:8px/1.7 'Press Start 2P', monospace; color:var(--ink);
+                        background:var(--paper); border:3px solid #a9b2c6; border-radius:6px; }
+  .route-choices .alt.on { border-color:var(--btn); background:var(--btn); color:#202020; }
+  .route-choices .alt b { font-size:10px; }
+  .route-choices .alt small { display:block; font-size:6px; color:var(--muted); }
+  .route-choices .alt.on small { color:#4a4030; }
+  body.driving .route-choices { display:none; }
   @keyframes arriveGlow { 50% { box-shadow:3px 3px 0 #0006, 0 0 0 4px #ffffff88; } }
   /* Which way you're heading: a pixel arrow around your character (turns with the map). */
   .heading { width:96px; height:96px; pointer-events:none; }
@@ -350,6 +361,9 @@
     <div class="legend" id="legend"></div>
     <div class="section">MAP ICONS</div>
     <div class="choices small" id="iconGroups"></div>
+    <div class="section">ROUTES</div>
+    <div class="choices small" id="routePrefs"></div>
+    <div class="choices small" id="avoidModes" style="margin-top:8px"></div>
     <div class="section">COLLECTION BOOK</div>
     <div class="choices small" id="collectModes"></div>
     <div class="section">FOG OF WAR</div>
@@ -433,6 +447,7 @@
   <button class="mini" type="button" id="driveVoiceBtn">VOICE ON</button>
   <button class="mini" type="button" id="driveExit">EXIT</button>
 </div>
+<div class="box route-choices" id="routeChoices" hidden aria-label="Route choices"></div>
 <button class="box arrive-btn" id="arriveBtn" type="button" hidden>I'M HERE ✓</button>
 <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer">
   <img id="lbImg" alt="">
@@ -623,6 +638,8 @@ const settings = {
   fog: store.get('mapsplus.fog') || 'off',                    // fog of war is opt-in
   weather: store.get('mapsplus.weather') || 'on',
   collect: store.get('mapsplus.collect') || 'on',             // collection book: catch places near you
+  routePref: store.get('mapsplus.routePref') || 'big',        // route choice: prefer bigger roads, or just the fastest
+  avoidBad: store.get('mapsplus.avoidBad') || 'on',           // steer clear of your BAD ROAD / POTHOLE / FLOODED pins
 };
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
 const nightAt = (p) => window.Sky ? Sky.isNight(p.lat, p.lng) : ((h) => h >= 18 || h < 6)(new Date().getHours());
@@ -963,6 +980,16 @@ function renderSettings() {
     return b;
   }));
 
+  const reroute = () => { if (alts.length && !nav.active) { applyAlt(pickBest()); } };
+  fill('routePrefs', [['big', 'BIG ROADS', 'PREFER MAIN ROADS'], ['fast', 'FASTEST', 'JUST THE QUICKEST']].map(([v, label, hint]) =>
+    choiceButton(label, settings.routePref === v, () => {
+      settings.routePref = v; store.set('mapsplus.routePref', v); reroute(); renderSettings();
+    }, null, hint)));
+  fill('avoidModes', [['on', 'AVOID BAD SPOTS', 'YOUR BAD ROAD / POTHOLE / FLOOD PINS'], ['off', 'DON\'T AVOID']].map(([v, label, hint]) =>
+    choiceButton(label, settings.avoidBad === v, () => {
+      settings.avoidBad = v; store.set('mapsplus.avoidBad', v); reroute(); renderSettings();
+    }, null, hint)));
+
   fill('collectModes', [['on', 'ON', 'CATCH PLACES NEAR YOU (GPS WHILE OPEN)'], ['off', 'OFF']].map(([v, label, hint]) =>
     choiceButton(label, settings.collect === v, () => {
       settings.collect = v; store.set('mapsplus.collect', v); updateWatch(); renderSettings();
@@ -1196,6 +1223,12 @@ function drawGoogleRoute(feats = shownFeats || routeFeats) {
     const color = sp === 'TRANSIT' ? f.properties.color : sp === 'SLOW' ? t.slow : sp === 'TRAFFIC_JAM' ? t.jam : t.clear;
     line({ path, strokeColor: t.casing, strokeWeight: 10, strokeOpacity: 0.9, zIndex: 1 });
     line({ path, strokeColor: color, strokeWeight: 6, strokeOpacity: 1, zIndex: 2 });
+  });
+  if (!nav.active) alts.forEach((a, i) => {                // the other route choices, grey, underneath
+    if (i === altIdx) return;
+    const path = a.coords.map(([lng, lat]) => ({ lat, lng }));
+    line({ path, strokeColor: '#202030', strokeWeight: 9, strokeOpacity: 0.5, zIndex: 0 });
+    line({ path, strokeColor: '#a9b2c6', strokeWeight: 6, strokeOpacity: 1, zIndex: 0 });
   });
 }
 
@@ -1460,14 +1493,130 @@ dialog.onclick = () => {
   showStep();
 };
 
+// ---------- route choices ----------
+// Google sends up to 3 routes in the same request (no extra cost). Each is scored for YOU:
+//  - how much of it is on bigger roads (read from the map tiles, not Google), if you prefer big roads
+//  - how many of your own BAD ROAD / POTHOLE / FLOODED pins it passes (within 25 m)
+// The best one is picked; the others show in grey and in a small list, tap one to switch.
+let alts = [], altIdx = 0;
+const AVOID_TYPES = ['badroad', 'pothole', 'flood'];
+function buildAlt(rt, mode) {
+  const r = R.featuresFor(rt, mode.id);
+  const feats = r.feats; let coords = r.coords;
+  // Roads often end before the tapped spot (e.g. inside a park): add a short "walk the last bit" line.
+  const end = coords[coords.length - 1];
+  if (end && Geo.dist({ lng: end[0], lat: end[1] }, dest) > 15) {
+    feats.push({ type: 'Feature', properties: { speed: 'WALK' }, geometry: { type: 'LineString', coordinates: [end, [dest.lng, dest.lat]] } });
+    coords = [...coords, [dest.lng, dest.lat]];
+  }
+  const via = (rt.description || '').trim();
+  return { route: rt, r, feats, coords, dur: secs(rt.duration), dist: rt.distanceMeters || 0, via, big: null,
+           bad: countBad(coords) };
+}
+// Share of a route (0..1) that runs along motorway / trunk / primary / secondary roads (tertiary counts half).
+function bigRoadShare(coords, roads) {
+  const CELL = 0.003, grid = new Map(), key = (x, y) => x + ':' + y;
+  roads.forEach((rd) => {
+    const w = rd.class === 'tertiary' ? 0.5 : 1;
+    for (let i = 1; i < rd.coords.length; i++) {
+      const a = rd.coords[i - 1], b = rd.coords[i];
+      const x0 = Math.floor(Math.min(a[0], b[0]) / CELL), x1 = Math.floor(Math.max(a[0], b[0]) / CELL);
+      const y0 = Math.floor(Math.min(a[1], b[1]) / CELL), y1 = Math.floor(Math.max(a[1], b[1]) / CELL);
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+        const k = key(x, y); if (!grid.has(k)) grid.set(k, []); grid.get(k).push([a, b, w]);
+      }
+    }
+  });
+  const total = Geo.length(coords); if (!total) return 0;
+  let score = 0, n = 0;
+  for (let d = 0; d <= total; d += 40) {
+    const p = Geo.atDistance(coords, d), pt = { lng: p.lng ?? p[0], lat: p.lat ?? p[1] };
+    const gx = Math.floor(pt.lng / CELL), gy = Math.floor(pt.lat / CELL);
+    let best = 0;
+    for (let x = gx - 1; x <= gx + 1 && best < 1; x++) for (let y = gy - 1; y <= gy + 1 && best < 1; y++) {
+      (grid.get(key(x, y)) || []).forEach(([a, b, w]) => { if (w > best && Geo.toLine(pt, [a, b]).dist < 25) best = w; });
+    }
+    score += best; n++;
+  }
+  return n ? score / n : 0;
+}
+// Lower is better. Bigger roads: up to +50% "felt time" for an all-small-roads route. Each bad pin: +5 min.
+function altScore(a) {
+  let s = a.dur;
+  if (settings.routePref === 'big' && a.big != null) s *= 1 + 0.5 * (1 - a.big);
+  if (settings.avoidBad === 'on') s += 300 * a.bad;
+  return s;
+}
+const countBad = (coords) => Hazards.list().filter((h) => AVOID_TYPES.includes(h.type) && Geo.toLine(h, coords).dist < 25).length;
+function pickBest() {
+  alts.forEach((a) => { a.bad = countBad(a.coords); });   // pins may have been added since the route came
+  let best = 0;
+  alts.forEach((a, i) => { if (altScore(a) < altScore(alts[best])) best = i; });
+  return best;
+}
+function renderChoices() {
+  const box = $('routeChoices');
+  if (alts.length < 2 || nav.active) { box.hidden = true; return; }
+  const fastest = alts.reduce((b, a, i) => (a.dur < alts[b].dur ? i : b), 0);
+  const biggest = alts.reduce((b, a, i) => ((a.big || 0) > (alts[b].big || 0) ? i : b), 0);
+  const best = pickBest();
+  box.replaceChildren(...alts.map((a, i) => {
+    const tags = [];
+    if (i === best) tags.push('★ BEST FOR YOU');
+    if (i === fastest) tags.push('FASTEST');
+    if (a.big != null && i === biggest && alts.length > 1) tags.push('BIGGEST ROADS');
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'alt' + (i === altIdx ? ' on' : '');
+    b.innerHTML = `<b>${Math.max(1, Math.round(a.dur / 60))} MIN</b> · ${fmtKm(a.dist)}${a.via ? ` · via ${esc(a.via)}` : ''}`
+      + `<small>${a.big != null ? `BIG ROADS ${Math.round(a.big * 100)}%` : 'CHECKING ROADS...'}`
+      + ` · ${a.bad ? `⚠ ${a.bad} BAD SPOT${a.bad > 1 ? 'S' : ''}` : 'NO BAD SPOTS'}${tags.length ? ' · ' + tags.join(' · ') : ''}</small>`;
+    b.onclick = () => { applyAlt(i); sfx('click'); };
+    return b;
+  }));
+  box.hidden = false;
+}
+function drawAlternatives() {
+  const others = alts.flatMap((a, i) => (i === altIdx ? [] : [{ type: 'Feature', properties: { idx: i },
+    geometry: { type: 'LineString', coordinates: a.coords } }]));
+  R.setAlternatives(pmap, nav.active ? [] : others);
+}
+// Make alternative i the route (map, Google layer, steps, summary).
+function applyAlt(i, opts = {}) {
+  const a = alts[i]; if (!a) return;
+  altIdx = i; route = a.route;
+  routeFeats = a.feats; routeStops = a.r.stops; routeCoords = a.coords; routeMode = a.mode;
+  prepareTrim();
+  R.setRoute(pmap, routeFeats, routeStops);
+  drawAlternatives();
+  drawGoogleRoute();
+  paintLegend();                       // also switches the line style for this mode
+  faceToward(routeCoords[Math.min(6, routeCoords.length - 1)][0]);
+  target.remove();
+  flag.setLngLat([dest.lng, dest.lat]).addTo(pmap);
+  const dur = a.dur, base = secs(route.staticDuration), delay = Math.max(0, dur - base);
+  const feats = routeFeats;
+  const jams = feats.filter((f) => f.properties.speed === 'TRAFFIC_JAM').length;
+  const slows = feats.filter((f) => f.properties.speed === 'SLOW').length;
+  const rides = feats.filter((f) => f.properties.speed === 'TRANSIT').length;
+  const line = a.mode === 'WALK' ? 'No traffic on foot!'
+    : a.mode === 'TRANSIT' ? (rides ? `${rides} RIDE${rides > 1 ? 'S' : ''} + some walking.` : 'Walking is quicker here!')
+    : delay >= 60 ? `Traffic adds ${Math.round(delay / 60)} MIN` + (jams ? ` (${jams} ROADBLOCK${jams > 1 ? 'S' : ''})` : '')
+    : (jams || slows) ? 'A little slow in spots.' : 'Roads are CLEAR!';
+  summary = `${esc(destName)}: ${fmtKm(a.dist)}, ${Math.max(1, Math.round(dur / 60))} MIN<br>${line} Tap for steps.`;
+  steps = a.r.steps; stepIdx = -1;
+  dialog.classList.toggle('clickable', steps.length > 0);
+  goBtn.disabled = false; startBtn.disabled = false; previewBtn.disabled = false;
+  renderChoices();
+  if (!opts.keepNav) showStep();
+}
 async function findRoute(opts = {}) {
   if (!dest || !gmap) return;
   if (!GOOGLE_MAPS_API_KEY) { msg('Directions need your<br>Google API key.'); return; }
   const from = here(), mode = R.MODES[modeIdx];
   goBtn.disabled = true;
-  if (!opts.keepNav) msg(`Finding a ${mode.label} route...`);
+  if (!opts.keepNav) msg(`Finding ${mode.label} routes...`);
+  let routes;
   try {
-    route = await R.computeRoute(GOOGLE_MAPS_API_KEY, from, dest, mode.id, mode.transit);
+    routes = await R.computeRoutes(GOOGLE_MAPS_API_KEY, from, dest, mode.id, mode.transit, true);
   } catch (err) {
     goBtn.disabled = false; sfx('error');
     const hint = err.status === 403 ? '<br>Enable "Routes API" for your key.'
@@ -1476,42 +1625,27 @@ async function findRoute(opts = {}) {
     console.warn('Routes API error:', err);
     return;
   }
-  const r = R.featuresFor(route, mode.id);
-  const feats = r.feats; let coords = r.coords;
-  // Roads often end before the tapped spot (e.g. inside a park): add a short "walk the last bit" line.
-  const end = coords[coords.length - 1];
-  if (end && Geo.dist({ lng: end[0], lat: end[1] }, dest) > 15) {
-    feats.push({ type: 'Feature', properties: { speed: 'WALK' }, geometry: { type: 'LineString', coordinates: [end, [dest.lng, dest.lat]] } });
-    coords = [...coords, [dest.lng, dest.lat]];
-  }
-  routeFeats = feats; routeStops = r.stops; routeCoords = coords; routeMode = mode.id;
-  prepareTrim();
-  R.setRoute(pmap, feats, routeStops);
-  drawGoogleRoute();
-  paintLegend();                       // also switches the line style for this mode
-  faceToward(coords[Math.min(6, coords.length - 1)][0]);
-  target.remove();
-  flag.setLngLat([dest.lng, dest.lat]).addTo(pmap);
-
-  const dur = secs(route.duration), base = secs(route.staticDuration), delay = Math.max(0, dur - base);
-  const jams = feats.filter((f) => f.properties.speed === 'TRAFFIC_JAM').length;
-  const slows = feats.filter((f) => f.properties.speed === 'SLOW').length;
-  const rides = feats.filter((f) => f.properties.speed === 'TRANSIT').length;
-  const line = mode.id === 'WALK' ? 'No traffic on foot!'
-    : mode.id === 'TRANSIT' ? (rides ? `${rides} RIDE${rides > 1 ? 'S' : ''} + some walking.` : 'Walking is quicker here!')
-    : delay >= 60 ? `Traffic adds ${Math.round(delay / 60)} MIN` + (jams ? ` (${jams} ROADBLOCK${jams > 1 ? 'S' : ''})` : '')
-    : (jams || slows) ? 'A little slow in spots.' : 'Roads are CLEAR!';
-  summary = `${esc(destName)}: ${fmtKm(route.distanceMeters || 0)}, ${Math.max(1, Math.round(dur / 60))} MIN<br>${line} Tap for steps.`;
-  steps = r.steps; stepIdx = -1;
-  dialog.classList.toggle('clickable', steps.length > 0);
-  goBtn.disabled = false; startBtn.disabled = false; previewBtn.disabled = false;
+  alts = routes.map((rt) => ({ ...buildAlt(rt, mode), mode: mode.id }));
+  const pick = () => applyAlt(pickBest(), opts);
+  pick();
   sfx('found');
   ensureGuard();
+  // How "big-road" each route is: zoom-12 map tiles (free, usually already cached). Then re-pick the best.
+  if (mode.id !== 'TRANSIT' && mode.id !== 'WALK') {
+    const lats = alts.flatMap((a) => a.coords.map((c) => c[1])), lngs = alts.flatMap((a) => a.coords.map((c) => c[0]));
+    const mine = alts;
+    tileTemplate().then((tpl) => AreaData.roads({ north: Math.max(...lats), south: Math.min(...lats), east: Math.max(...lngs), west: Math.min(...lngs) }, tpl))
+      .then((roads) => {
+        if (alts !== mine) return;                       // a newer route search replaced these
+        alts.forEach((a) => { a.big = bigRoadShare(a.coords, roads); });
+        const best = pickBest();
+        if (!nav.active && best !== altIdx) applyAlt(best, opts); else renderChoices();
+      }).catch((err) => console.warn('Road sizes unavailable:', err));
+  }
   if (opts.keepNav) { nav.stepIdx = 0; if (drive.active) prepareDriveRoute(); showNavStep(); return; }
-  showStep();
   const b = new google.maps.LatLngBounds();
-  coords.forEach(([lng, lat]) => b.extend({ lat, lng }));
-  gmap.fitBounds(b, { top: 170, bottom: 140, left: 40, right: 40 });   // the overlay follows
+  alts.forEach((a) => a.coords.forEach(([lng, lat]) => b.extend({ lat, lng })));
+  gmap.fitBounds(b, { top: 170, bottom: 230, left: 40, right: 40 });   // the overlay follows
 }
 goBtn.onclick = () => findRoute();
 
@@ -1602,6 +1736,7 @@ function startNav() {
   if (!navigator.geolocation) { msg('This device cannot<br>share its location.'); return; }
   Object.assign(nav, { active: true, stepIdx: 0, offCount: 0, follow: true });
   startBtn.textContent = 'STOP'; startBtn.classList.add('on');
+  $('routeChoices').hidden = true; R.setAlternatives(pmap, []); drawGoogleRoute();
   Progress.tripStarted();
   stopReplay(true); Hazards.resetWarnings();
   Trips.start({ mode: routeMode, dest: destName, xp: Progress.state.xp });
@@ -1809,6 +1944,7 @@ $('driveVoiceBtn').onclick = () => setVoice(drive.voice === 'on' ? 'off' : 'on')
 function clearRoute() {
   if (nav.active) stopNav();
   route = null; routeFeats = []; routeStops = []; routeCoords = []; steps = []; stepIdx = -1; summary = ''; shownFeats = null;
+  alts = []; altIdx = 0; $('routeChoices').hidden = true; R.setAlternatives(pmap, []);
   dest = null; destName = ''; destPlaceId = null;
   R.setRoute(pmap, []); target.remove(); flag.remove();
   $('infoBtn').hidden = true; dialog.classList.remove('clickable');
@@ -2608,6 +2744,11 @@ window.initMap = () => {
     hideResults();
     const pos = { lat: e.latLng.lat(), lng: e.latLng.lng() };
     if (Date.now() < suppressClickUntil) { if (e.placeId) e.stop(); return; }   // that was a long-press
+    if (alts.length > 1 && !nav.active && pmap.getLayer('route-alt')) {          // tapped a grey route choice
+      const q = pmap.project([pos.lng, pos.lat]);
+      const hit = pmap.queryRenderedFeatures([[q.x - 10, q.y - 10], [q.x + 10, q.y + 10]], { layers: ['route-alt'] })[0];
+      if (hit) { if (e.placeId) e.stop(); applyAlt(hit.properties.idx); sfx('click'); return; }
+    }
     const pin = savedAt(pos);           // your HOME / WORK / favourite pins come first
     if (pin) { if (e.placeId) e.stop(); selectSaved(pin); return; }
     const icon = iconAt(pos);           // one of our pixel icons: that's what you see, so it wins

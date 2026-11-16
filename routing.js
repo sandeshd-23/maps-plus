@@ -56,7 +56,7 @@
   }
 
   const FIELDS = [
-    'routes.duration', 'routes.staticDuration', 'routes.distanceMeters',
+    'routes.duration', 'routes.staticDuration', 'routes.distanceMeters', 'routes.description', 'routes.routeLabels',
     'routes.polyline.encodedPolyline', 'routes.travelAdvisory.speedReadingIntervals',
     'routes.legs.steps.navigationInstruction', 'routes.legs.steps.distanceMeters',
     // For live navigation (where each step ends) and transit (per-step lines, stops and vehicles).
@@ -76,16 +76,18 @@
       err.status = res.status; throw err;
     }
     if (!data.routes || !data.routes.length) throw new Error('No route found between those points.');
-    return data.routes[0];
+    return data.routes;
   }
 
-  async function computeRoute(key, from, to, mode, transitModes) {
+  // All routes Google suggests (up to 3 with `alternatives`; same single request, same price).
+  async function computeRoutes(key, from, to, mode, transitModes, alternatives) {
     const body = {
       origin:      { location: { latLng: { latitude: from.lat, longitude: from.lng } } },
       destination: { location: { latLng: { latitude: to.lat,   longitude: to.lng   } } },
       travelMode: mode, polylineQuality: 'HIGH_QUALITY', languageCode: 'en-IN', units: 'METRIC',
     };
     if (mode === 'TRANSIT' && transitModes) body.transitPreferences = { allowedTravelModes: transitModes };
+    if (alternatives) body.computeAlternativeRoutes = true;
     if (mode === 'WALK' || mode === 'TRANSIT') return callRoutes(key, body);   // no road traffic for these
     body.extraComputations = ['TRAFFIC_ON_POLYLINE'];
     try {
@@ -95,6 +97,7 @@
       return callRoutes(key, { ...body, routingPreference: 'TRAFFIC_AWARE' });
     }
   }
+  const computeRoute = async (...a) => (await computeRoutes(...a))[0];
 
   const EMPTY = { type: 'FeatureCollection', features: [] };
   const width = (a, b, c) => window.MapScale.routeWidth(a, b, c);   // thinner when zoomed out (map-scale.js)
@@ -173,6 +176,12 @@
 
   // Route layers sit above roads and buildings, below the labels.
   function addLayers(pmap, beforeId) {
+    // Other route choices: grey, under the chosen one (tap one to pick it).
+    pmap.addSource('route-alt', { type: 'geojson', data: EMPTY });
+    pmap.addLayer({ id: 'route-alt-casing', type: 'line', source: 'route-alt', layout: { 'line-cap': 'round', 'line-join': 'round' },
+                    paint: { 'line-color': '#202030', 'line-opacity': 0.55, 'line-width': width(9, 13, 22) } }, beforeId);
+    pmap.addLayer({ id: 'route-alt', type: 'line', source: 'route-alt', layout: { 'line-cap': 'round', 'line-join': 'round' },
+                    paint: { 'line-color': '#a9b2c6', 'line-width': width(6, 9, 15) } }, beforeId);
     pmap.addSource('route', { type: 'geojson', data: EMPTY });
     const layout = { 'line-cap': 'square', 'line-join': 'miter' };
     pmap.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout, filter: EDGED,
@@ -271,6 +280,12 @@
     return sharp;
   }
 
-  window.GameRoutes = { THEMES, MODES, decodePolyline, splitByTraffic, featuresFor, stepText, computeRoute, addLayers,
+  function setAlternatives(pmap, features) {
+    const src = pmap.getSource('route-alt');
+    if (src) src.setData({ type: 'FeatureCollection', features });
+  }
+
+  window.GameRoutes = { THEMES, MODES, decodePolyline, splitByTraffic, featuresFor, stepText, computeRoute, computeRoutes,
+                        setAlternatives, addLayers,
                         applyTheme, setMode, sampleCSS, setRoute, makeFlag };
 })();

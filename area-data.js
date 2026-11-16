@@ -1,8 +1,10 @@
 // Reads OpenFreeMap vector tiles directly (the same files the game map uses, so usually already cached) to
 // count every place in a whole area, not just the part of the map on screen. Tiny built-in decoder for the
 // two layers we need ("poi" and "place", point features only); no libraries.
-// Exposes window.AreaData = { load(lat, lng, rings, template) -> Promise<{ pois, places }> }
+// Exposes window.AreaData = { load(lat, lng, rings, template) -> Promise<{ pois, places }>,
+//                             roads(bounds, template) -> Promise<[{ class, coords: [[lng, lat], ...] }]> }
 //   pois:   [{ lng, lat, name, class, subclass, rank }],  places: [{ lng, lat, name, class, rank }]
+//   roads:  the bigger roads (motorway ... tertiary) from zoom-12 tiles, used to judge how "big-road" a route is.
 (() => {
   const Z = 14;                                   // the most detailed level the tiles have
   const cache = new Map();                        // "x/y" -> Promise<{ pois, places }>
@@ -42,7 +44,7 @@
     return out;
   }
   // Decode the wanted layers of one tile into plain point features with properties.
-  function decode(buf, x, y, want) {
+  function decode(buf, x, y, want, z = Z, lines = false) {
     const out = {};
     const r = reader(buf);
     while (r.pos < r.end) {
@@ -74,15 +76,26 @@
           else if (f === 4) { const [a, b] = F.bytes(); geom = packed(buf, a, b); }
           else F.skip(t & 7);
         }
-        if (type !== 1 || geom.length < 3) return;          // points only
         const zz = (n) => (n >> 1) ^ (-(n & 1));
-        const px = zz(geom[1]), py = zz(geom[2]);
-        const n = Math.pow(2, Z);
-        const lng = (x + px / extent) / n * 360 - 180;
-        const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + py / extent) / n))) * 180 / Math.PI;
-        const p = { lng, lat };
-        for (let i = 0; i + 1 < tags.length; i += 2) p[keys[tags[i]]] = val(tags[i + 1]);
-        list.push(p);
+        const n = Math.pow(2, z);
+        const toLL = (px, py) => [(x + px / extent) / n * 360 - 180,
+          Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + py / extent) / n))) * 180 / Math.PI];
+        const props = {};
+        for (let i = 0; i + 1 < tags.length; i += 2) props[keys[tags[i]]] = val(tags[i + 1]);
+        if (lines && type === 2) {                               // line strings (MoveTo / LineTo commands)
+          let i = 0, cx = 0, cy = 0, cur = null;
+          while (i < geom.length) {
+            const cmd = geom[i++], id = cmd & 7, count = cmd >> 3;
+            for (let k = 0; k < count && (id === 1 || id === 2); k++) {
+              cx += zz(geom[i++]); cy += zz(geom[i++]);
+              if (id === 1) { cur = [toLL(cx, cy)]; list.push({ ...props, coords: cur }); } else if (cur) cur.push(toLL(cx, cy));
+            }
+          }
+          return;
+        }
+        if (type !== 1 || geom.length < 3) return;          // points only
+        const [lng, lat] = toLL(zz(geom[1]), zz(geom[2]));
+        list.push({ lng, lat, ...props });
       });
     }
     return out;
@@ -111,5 +124,27 @@
     const tiles = await Promise.all(jobs);
     return { pois: tiles.flatMap((t) => t.poi), places: tiles.flatMap((t) => t.place) };
   }
-  window.AreaData = { load, tileXY, Z };
+  // Bigger roads in an area (zoom-12 tiles: ~10 km each, so a city route needs only a few).
+  const RZ = 12, roadCache = new Map();
+  const BIG = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary']);
+  function roadTile(template, x, y) {
+    const k = x + '/' + y;
+    if (!roadCache.has(k)) {
+      const url = template.replace('{z}', RZ).replace('{x}', x).replace('{y}', y);
+      roadCache.set(k, fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null)).then((ab) => {
+        if (!ab) return [];
+        const d = decode(new Uint8Array(ab), x, y, ['transportation'], RZ, true);
+        return (d.transportation || []).filter((f) => BIG.has(f.class) && f.coords.length > 1).map((f) => ({ class: f.class, coords: f.coords }));
+      }).catch(() => { roadCache.delete(k); return []; }));
+    }
+    return roadCache.get(k);
+  }
+  async function roads(b, template) {
+    const n = Math.pow(2, RZ), tx = (lng) => Math.floor((lng + 180) / 360 * n);
+    const ty = (lat) => Math.floor((1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * n);
+    const jobs = [];
+    for (let x = tx(b.west); x <= tx(b.east); x++) for (let y = ty(b.north); y <= ty(b.south); y++) jobs.push(roadTile(template, x, y));
+    return (await Promise.all(jobs)).flat();
+  }
+  window.AreaData = { load, roads, tileXY, Z };
 })();
