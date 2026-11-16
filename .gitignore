@@ -13,3 +13,6 @@ __pycache__/
 *.pyc
 Thumbs.db
 desktop.ini
+
+# graphify knowledge graph (local analysis output, not part of the website)
+graphify-out/
