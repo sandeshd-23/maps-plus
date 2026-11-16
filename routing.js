@@ -13,7 +13,9 @@
     { id: 'DRIVE',       label: 'CAR'  },
     { id: 'TWO_WHEELER', label: 'BIKE' },
     { id: 'WALK',        label: 'WALK' },
-    { id: 'TRANSIT',     label: 'METRO' },   // Namma Metro + BMTC buses (with walking between)
+    // Public transport, split like Google's filters: METRO = rail only (Namma Metro), BUS = BMTC buses only.
+    { id: 'TRANSIT',     label: 'METRO', transit: ['SUBWAY', 'LIGHT_RAIL', 'RAIL', 'TRAIN'] },
+    { id: 'TRANSIT',     label: 'BUS',   transit: ['BUS'] },
   ];
   // Fallback line colors if Google doesn't send one (Namma Metro purple, bus green).
   const VEHICLE_COLOR = { SUBWAY: '#8a2d98', METRO_RAIL: '#8a2d98', HEAVY_RAIL: '#8a2d98', LIGHT_RAIL: '#8a2d98',
@@ -77,12 +79,13 @@
     return data.routes[0];
   }
 
-  async function computeRoute(key, from, to, mode) {
+  async function computeRoute(key, from, to, mode, transitModes) {
     const body = {
       origin:      { location: { latLng: { latitude: from.lat, longitude: from.lng } } },
       destination: { location: { latLng: { latitude: to.lat,   longitude: to.lng   } } },
       travelMode: mode, polylineQuality: 'HIGH_QUALITY', languageCode: 'en-IN', units: 'METRIC',
     };
+    if (mode === 'TRANSIT' && transitModes) body.transitPreferences = { allowedTravelModes: transitModes };
     if (mode === 'WALK' || mode === 'TRANSIT') return callRoutes(key, body);   // no road traffic for these
     body.extraComputations = ['TRAFFIC_ON_POLYLINE'];
     try {

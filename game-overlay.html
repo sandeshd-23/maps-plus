@@ -276,6 +276,15 @@
   .drive-bar .grow { flex:1; line-height:1.9; min-width:150px; }
   .drive-bar .speed { font-size:14px; }
   .drive-banner[hidden], .drive-bar[hidden] { display:none; }
+  /* Near the destination: say you're there (GPS can be off by a few dozen metres, or you parked nearby). */
+  .arrive-btn { position:absolute; right:12px; bottom:calc(var(--google-bar) + 128px); z-index:8; padding:12px 14px;
+                font:11px 'Press Start 2P', monospace; cursor:pointer; background:var(--btn-on); color:#202020;
+                animation:pop .3s steps(3), arriveGlow 1.2s steps(2) infinite; }
+  .arrive-btn[hidden] { display:none; }
+  @keyframes arriveGlow { 50% { box-shadow:3px 3px 0 #0006, 0 0 0 4px #ffffff88; } }
+  /* Which way you're heading: a pixel arrow around your character (turns with the map). */
+  .heading { width:96px; height:96px; pointer-events:none; }
+  .heading canvas { display:block; margin:0 auto; }
   .player { width:36px; height:42px; image-rendering:pixelated; filter:drop-shadow(2px 3px 0 #0005); }
   /* The pulse lives on an inner box: MapLibre positions the outer element with `transform`,
      so animating `transform` on the outer element would fight with it. */
@@ -420,9 +429,11 @@
 <div class="box drive-bar" id="driveBar" hidden>
   <div class="grow"><span class="speed" id="driveSpeed">-- KM/H</span><br><span id="driveEta"></span></div>
   <button class="mini" type="button" id="driveCenter">RECENTER</button>
+  <button class="mini" type="button" id="drivePeek">PEEK</button>
   <button class="mini" type="button" id="driveVoiceBtn">VOICE ON</button>
   <button class="mini" type="button" id="driveExit">EXIT</button>
 </div>
+<button class="box arrive-btn" id="arriveBtn" type="button" hidden>I'M HERE ✓</button>
 <div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer">
   <img id="lbImg" alt="">
   <div class="box lb-bar">
@@ -484,6 +495,87 @@ function setPlayerSprite(el) {
   player = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat(at).addTo(pmap);
 }
 const here = () => { const p = player.getLngLat(); return { lat: p.lat, lng: p.lng }; };
+
+// ---------- which way you're heading ----------
+// A small pixel arrow around your character points where you're going (GPS course while moving; the phone's
+// compass when standing still), and the character faces left / right to match what you see on screen.
+const headingEl = document.createElement('div'); headingEl.className = 'heading';
+headingEl.appendChild((() => {
+  const rows = ['....K....', '...KYK...', '..KYYYK..', '.KYYYYYK.', 'KYYKKKYYK', 'KKK...KKK'];
+  const c = document.createElement('canvas'); c.width = 9; c.height = 6;
+  const g = c.getContext('2d');
+  rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch !== '.') { g.fillStyle = ch === 'K' ? '#202020' : '#ffd44a'; g.fillRect(x, y, 1, 1); } }));
+  return Crisp.canvas(c, 2);
+})());
+headingEl.style.visibility = 'hidden';
+// Centred on your character's body (it stands on its point), so the arrow circles around it, not behind it.
+const headingMarker = new maplibregl.Marker({ element: headingEl, rotationAlignment: 'map', pitchAlignment: 'map', offset: [0, -18] })
+  .setLngLat(player.getLngLat()).addTo(pmap);
+const myHeading = { deg: null, src: null, gpsAt: 0, t: 0 };
+function setHeading(deg, src) {
+  const now = Date.now();
+  if (src === 'gps') myHeading.gpsAt = now;
+  else if (now - myHeading.gpsAt < 5000) return;          // moving: the GPS course wins over the compass
+  if (now - myHeading.t < 80 && src !== 'gps') return;
+  myHeading.deg = (deg + 360) % 360; myHeading.src = src; myHeading.t = now;
+  headingMarker.setRotation(myHeading.deg);
+  headingEl.style.visibility = previewing ? 'hidden' : '';
+  updateFacing();
+}
+// Face left / right by where the heading points ON SCREEN (the map may be turned, e.g. heading-up driving).
+function updateFacing() {
+  if (myHeading.deg == null || previewing) return;
+  const rel = ((myHeading.deg - (window.__mapBearing || 0)) % 360 + 360) % 360;
+  const want = rel > 15 && rel < 165 ? 'right' : rel > 195 && rel < 345 ? 'left' : facing;   // keep it near straight up/down
+  if (want !== facing) { facing = want; Avatars.face(player.getElement(), facing); }
+}
+// The phone's compass (works on Android; iPhones need a permission tap, so they use GPS only).
+function onOrientation(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
+  else if (e.absolute && e.alpha != null) h = 360 - e.alpha;
+  if (h == null) return;
+  const turn = (screen.orientation && screen.orientation.angle) || 0;
+  setHeading(h + turn, 'compass');
+}
+if ('ondeviceorientationabsolute' in window) addEventListener('deviceorientationabsolute', onOrientation);
+else addEventListener('deviceorientation', onOrientation);
+
+// ---------- route behind you disappears ----------
+// While navigating, the part of the route you've already covered is removed (like Google Maps).
+let shownFeats = null, featStart = [], featLen = [], trimmedAt = 0;
+function prepareTrim() {
+  shownFeats = null; trimmedAt = 0; featStart = []; featLen = [];
+  let at = 0;
+  routeFeats.forEach((f) => { const L = Geo.length(f.geometry.coordinates); featStart.push(at); featLen.push(L); at += L; });
+}
+function trimRoute(pos) {
+  if (!routeFeats.length || !routeCoords.length) return;
+  const along = Geo.toLine(pos, routeCoords).along;
+  if (along - trimmedAt < 8) return;                     // only every few metres forward
+  trimmedAt = along;
+  const out = [];
+  routeFeats.forEach((f, i) => {
+    const s = featStart[i], e = s + featLen[i];
+    if (e <= along) return;                              // fully behind you
+    if (s >= along) { out.push(f); return; }
+    const c = f.geometry.coordinates, need = along - s;   // cut this one where you are
+    let walked = 0;
+    for (let k = 1; k < c.length; k++) {
+      const a = c[k - 1], b = c[k], d = Geo.dist({ lng: a[0], lat: a[1] }, { lng: b[0], lat: b[1] });
+      if (walked + d >= need) {
+        const t = d ? (need - walked) / d : 0;
+        const cut = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        out.push({ ...f, geometry: { type: 'LineString', coordinates: [cut, ...c.slice(k)] } });
+        return;
+      }
+      walked += d;
+    }
+  });
+  shownFeats = out;
+  R.setRoute(pmap, out, routeStops);
+  drawGoogleRoute(out);
+}
 
 // The avatar depends on theme + travel mode and faces the way you're heading.
 let packWalker = null, facing = 'right';
@@ -924,6 +1016,7 @@ function togglePeek() {
   $('peek').classList.toggle('on', on);
   $('peek').textContent = phone.matches ? (on ? 'BACK' : 'PEEK') : (on ? 'BACK TO GAME' : 'PEEK GOOGLE');
   $('peek').setAttribute('aria-pressed', on);
+  $('drivePeek').textContent = on ? 'BACK' : 'PEEK'; $('drivePeek').classList.toggle('on', on);
   if (on) ensureGuard();
 }
 $('peek').onclick = togglePeek;
@@ -983,9 +1076,19 @@ const savedIcon = (type, scale = 2) => {
   const img = window.PixelArt && PixelArt.savedIcons && PixelArt.savedIcons[type];
   return iconCanvas(img || fallbackIcon(SAVED_COLORS[type] || '#e8302c'), scale);
 };
+// Pins hide when zoomed out to city level (Google zoom 12.5 and below), so they don't pile up on the city.
+let pinsShown = true;
+function updatePinVisibility(force) {
+  const show = pmap.getZoom() >= 11.5;
+  if (show === pinsShown && !force) return;
+  pinsShown = show;
+  savedMarkers.forEach((m) => { m.getElement().style.visibility = show ? '' : 'hidden'; });
+}
+pmap.on('zoom', () => updatePinVisibility());
 function renderSavedMarkers() {
   savedMarkers.forEach((m) => m.remove());
   savedMarkers = saved.map((p) => new maplibregl.Marker({ element: savedIcon(p.type, 1.4), anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(pmap));
+  updatePinVisibility(true);
 }
 function persistSaved() { store.set('mapsplus.saved', JSON.stringify(saved)); renderSavedMarkers(); renderPlaces(); }
 function saveDest(type) {
@@ -1006,6 +1109,7 @@ function selectSaved(p, moveMap) {
 function savedAt(latLng) {
   const pt = pmap.project([latLng.lng, latLng.lat]);
   let best = null, bestD = Infinity;
+  if (!pinsShown) return null;
   saved.forEach((p) => {
     const q = pmap.project([p.lng, p.lat]), dx = pt.x - q.x, dy = pt.y - q.y;
     if (Math.abs(dx) <= 18 && dy <= 4 && dy >= -44) { const d = Math.hypot(dx, dy + 20); if (d < bestD) { bestD = d; best = p; } }
@@ -1068,6 +1172,7 @@ function setDestination(pos, name, placeId) {
 let gMe = null, gDest = null, gRouteLines = [];
 function movePlayer(lng, lat) {
   player.setLngLat([lng, lat]);
+  headingMarker.setLngLat([lng, lat]);
   if (gMe) gMe.position = { lat, lng };
 }
 function syncGoogleDest() {
@@ -1075,12 +1180,12 @@ function syncGoogleDest() {
   gDest.position = dest ? { lat: dest.lat, lng: dest.lng } : null;
   gDest.map = dest ? gmap : null;
 }
-function drawGoogleRoute() {
+function drawGoogleRoute(feats = shownFeats || routeFeats) {
   gRouteLines.forEach((l) => l.setMap(null)); gRouteLines = [];
-  if (!gmap || !routeFeats.length) return;
+  if (!gmap || !feats.length) return;
   const t = R.THEMES[themeIdx];
   const line = (opts) => gRouteLines.push(new google.maps.Polyline({ map: gmap, clickable: false, ...opts }));
-  routeFeats.forEach((f) => {
+  feats.forEach((f) => {
     const path = f.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
     const sp = f.properties.speed;
     if (sp === 'WALK') {          // walking: a trail of dots, like the game map
@@ -1362,11 +1467,11 @@ async function findRoute(opts = {}) {
   goBtn.disabled = true;
   if (!opts.keepNav) msg(`Finding a ${mode.label} route...`);
   try {
-    route = await R.computeRoute(GOOGLE_MAPS_API_KEY, from, dest, mode.id);
+    route = await R.computeRoute(GOOGLE_MAPS_API_KEY, from, dest, mode.id, mode.transit);
   } catch (err) {
     goBtn.disabled = false; sfx('error');
     const hint = err.status === 403 ? '<br>Enable "Routes API" for your key.'
-      : mode.id === 'TRANSIT' ? '<br>No metro/bus way here. Try WALK or CAR.' : '';
+      : mode.id === 'TRANSIT' ? `<br>No ${mode.label} way here. Try ${mode.label === 'BUS' ? 'METRO' : 'BUS'}, WALK or CAR.` : '';
     msg(`No route! ${esc(err.message).slice(0, 80)}${hint}`);
     console.warn('Routes API error:', err);
     return;
@@ -1380,6 +1485,7 @@ async function findRoute(opts = {}) {
     coords = [...coords, [dest.lng, dest.lat]];
   }
   routeFeats = feats; routeStops = r.stops; routeCoords = coords; routeMode = mode.id;
+  prepareTrim();
   R.setRoute(pmap, feats, routeStops);
   drawGoogleRoute();
   paintLegend();                       // also switches the line style for this mode
@@ -1504,6 +1610,7 @@ function startNav() {
   if (isRoadMode(routeMode)) enterDrive();     // CAR / BIKE: full driving view
 }
 function stopNav(text) {
+  $('arriveBtn').hidden = true;
   if (drive.active) exitDrive();
   nav.active = false; startBtn.textContent = 'START'; startBtn.classList.remove('on');
   if (window.Native && Native.isApp) Native.showOnLockScreen(false);
@@ -1524,7 +1631,7 @@ function onFix(p) {
   let course = p.coords.heading != null && !isNaN(p.coords.heading) && (p.coords.speed || 0) > 1 ? p.coords.heading : null;
   if (lastFix && acc < 50) {
     const d = Geo.dist(lastFix.pos, pos), dt = Math.max(1, (t - lastFix.t) / 1000);
-    if (d >= 3) { const b = Geo.bearing(lastFix.pos, pos); faceBearing(b); if (course === null) course = b; }
+    if (d >= 3) { const b = Geo.bearing(lastFix.pos, pos); if (course === null) course = b; }
     if (d >= 2 && d < 300) {            // ignore GPS jitter and jumps
       const speed = p.coords.speed != null && p.coords.speed >= 0 ? p.coords.speed : d / dt;
       const mode = nav.active ? routeMode : speed < 2.5 ? 'WALK' : speed < 9 ? 'TWO_WHEELER' : 'DRIVE';
@@ -1532,6 +1639,7 @@ function onFix(p) {
       if (nightAt(pos)) Progress.markNight();
     }
   }
+  if (course != null && (p.coords.speed == null || p.coords.speed > 0.8)) setHeading(course, 'gps');
   if (acc < 50) lastFix = { pos, t };
   if (nav.active) { Trips.point(pos, acc, t); navUpdate(pos, p, course); }
   else if (course != null && (p.coords.speed || 0) > 3) {      // riding around without a route
@@ -1556,15 +1664,23 @@ function explore(pos) {
   });
 }
 
+// Arrived (automatically within 30 m, or when you tap I'M HERE): fanfare, voice, XP, trip saved.
+function arrive() {
+  if (!nav.active) return;
+  if (Trips.current) Trips.current.arrived = true;
+  sfx('arrive'); Progress.tripFinished(routeMode); speak(`You have arrived at ${destName}`);
+  if (navigator.vibrate) try { navigator.vibrate([80, 60, 80, 60, 200]); } catch (_) {}
+  $('arriveBtn').hidden = true;
+  stopNav(`You arrived at ${esc(destName)}!<br>+25 XP. Well played!`);
+}
+$('arriveBtn').onclick = arrive;
 function navUpdate(pos, p, course) {
   if (drive.active) { if (course != null) drive.heading = course; driveCamera(pos, drive.heading); }
   else if (nav.follow && gmap) gmap.panTo(pos);
-  if (dest && Geo.dist(pos, dest) < 30) {
-    if (Trips.current) Trips.current.arrived = true;
-    sfx('arrive'); Progress.tripFinished(routeMode); speak(`You have arrived at ${destName}`);
-    stopNav(`You arrived at ${esc(destName)}!<br>+25 XP. Well played!`);
-    return;
-  }
+  const toDest = dest ? Geo.dist(pos, dest) : Infinity;
+  if (toDest < 30) { arrive(); return; }
+  $('arriveBtn').hidden = toDest > 150;                 // close by (parking, gate...): let me say I'm here
+  trimRoute(pos);
   let s = steps[nav.stepIdx];
   while (s && s.end && Geo.dist(pos, s.end) < 25 && nav.stepIdx < steps.length - 1) {
     nav.stepIdx++; s = steps[nav.stepIdx]; sfx('step'); showNavStep();
@@ -1684,6 +1800,7 @@ function driveCamera(pos, heading) {
 }
 $('driveExit').onclick = () => stopNav('Navigation stopped.<br>Press START to resume.');
 $('driveCenter').onclick = () => { nav.follow = true; driveCamera(here(), drive.heading); };
+$('drivePeek').onclick = () => togglePeek();
 $('driveVoiceBtn').onclick = () => setVoice(drive.voice === 'on' ? 'off' : 'on');
 
 // ---------- back gesture / back button ----------
@@ -1691,7 +1808,7 @@ $('driveVoiceBtn').onclick = () => setVoice(drive.voice === 'on' ? 'off' : 'on')
 // photo viewer > mode menu > search results > panels > PEEK > navigation (and drive mode) > route.
 function clearRoute() {
   if (nav.active) stopNav();
-  route = null; routeFeats = []; routeStops = []; routeCoords = []; steps = []; stepIdx = -1; summary = '';
+  route = null; routeFeats = []; routeStops = []; routeCoords = []; steps = []; stepIdx = -1; summary = ''; shownFeats = null;
   dest = null; destName = ''; destPlaceId = null;
   R.setRoute(pmap, []); target.remove(); flag.remove();
   $('infoBtn').hidden = true; dialog.classList.remove('clickable');
@@ -1752,7 +1869,8 @@ const compassDial = (() => {
 $('compass').prepend(compassDial);
 let mapBearing = 0;
 function setCompass(bearing) {
-  mapBearing = bearing;
+  mapBearing = bearing; window.__mapBearing = bearing;
+  updateFacing();
   compassDial.style.transform = `rotate(${-bearing}deg)`;
 }
 $('compass').onclick = () => {
@@ -1760,7 +1878,9 @@ $('compass').onclick = () => {
   if (drive.active) {                                  // drive mode: switch heading-up <-> north-up
     drive.northUp = !drive.northUp;
     $('compassTag').textContent = drive.northUp ? 'N-UP' : 'H-UP'; $('compassTag').hidden = false;
+    nav.follow = true;                                 // also re-centres if you had dragged the map
     driveCamera(here(), drive.heading);
+    toast(drive.northUp ? 'NORTH UP' : 'HEADING UP');
     return;
   }
   // Turn back to north smoothly.
