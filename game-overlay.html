@@ -80,7 +80,9 @@
   .search input { flex:1; min-width:0; font-family:'Press Start 2P', monospace; font-size:10px; padding:10px;
                   color:var(--ink); background:var(--paper); border:5px double var(--frame); border-radius:6px; }
   .search input::placeholder { color:var(--muted); }
-  .results { position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:9; padding:4px; max-height:50vh; overflow:auto; }
+  /* --vvh = the visible height (shrinks when the on-screen keyboard is up), so results never hide under it. */
+  .results { position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:9; padding:4px; overflow:auto;
+             max-height:min(50vh, calc(var(--vvh, 100vh) - 110px)); }
   .results button { display:block; width:100%; text-align:left; cursor:pointer; background:transparent; color:var(--ink);
                     border:0; border-bottom:2px dashed var(--frame); padding:8px 6px; font:9px/1.6 'Press Start 2P', monospace; }
   .results button:last-child { border-bottom:0; }
@@ -96,6 +98,18 @@
   .compass .mode-tag { position:absolute; bottom:-14px; left:50%; transform:translateX(-50%); font:7px 'Press Start 2P', monospace;
                        color:var(--ink); background:var(--paper); border:2px solid var(--frame); border-radius:3px; padding:2px 3px; white-space:nowrap; }
   .compass .mode-tag[hidden] { display:none; }
+  /* Full screen: a small square under the compass (pixel corner brackets; they point inward when on). */
+  .fs-btn { position:absolute; right:12px; top:190px; z-index:6; width:48px; height:48px; padding:0; cursor:pointer;
+            background:var(--paper); border:4px double var(--frame); border-radius:6px; box-shadow:3px 3px 0 #0006;
+            --fs-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h3v1H1v2H0zM5 0h3v3H7V1H5zM0 5h1v2h2v1H0zM7 5h1v3H5V7h2z'/%3E%3C/svg%3E"); }
+  .fs-btn.on { --fs-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cpath d='M2 0h1v3H0V2h2zM5 0h1v2h2v1H5zM0 5h3v3H2V6H0zM5 5h3v1H6v2H5z'/%3E%3C/svg%3E"); }
+  .fs-btn::before { content:''; position:absolute; inset:0; margin:auto; width:24px; height:24px; background:var(--ink);
+                    -webkit-mask:var(--fs-icon) center/24px 24px no-repeat; mask:var(--fs-icon) center/24px 24px no-repeat; }
+  .fs-btn[hidden] { display:none; }
+  .install-steps { margin:8px 0 0; padding-left:18px; }
+  .install-steps li { margin:6px 0; }
+  .install-steps .here { color:var(--ink); }
+  .install-steps .other { color:var(--muted); }
   .choice .ico { display:block; width:24px; height:24px; image-rendering:pixelated; margin-bottom:4px; }
   /* Collection book */
   .book-sum { font-size:9px; line-height:1.8; padding:6px 0 2px; }
@@ -319,10 +333,29 @@
     .hud #peek::before { left:6px; width:14px; height:10px; margin-top:-5px; background-size:14px 10px; }
     .dialog { left:8px; right:8px; font-size:9px; padding:9px 11px; line-height:1.8; }
     .compass { right:8px; width:44px; height:44px; border-width:3px; }
+    .fs-btn { right:8px; width:44px; height:44px; border-width:3px; }
     .drive-banner { left:8px; right:8px; top:8px; padding:9px 11px; }
     .drive-banner .dist { font-size:12px; }
     .drive-banner .text { font-size:14px; }
     .drive-bar { left:8px; right:8px; }
+  }
+  /* Touch screens (2-in-1 laptops, tablets): the map takes every touch and pinch itself, and the page
+     never pinch-zooms or bounces around it. Panels still scroll with a finger. */
+  html, body { touch-action:pan-x pan-y; overscroll-behavior:none; }
+  #gmap { touch-action:none; }
+  .settings, .results, .route-choices { overscroll-behavior:contain; }
+  /* Finger-sized controls (44px) on touch screens; phones (<=600px) keep the compact bar above. */
+  @media (any-pointer: coarse) and (min-width: 601px) {
+    .hud button, .panel-head button, .choice, .mini, .tab, .results button, .route-choices .alt, .mode-menu button,
+    .lb-bar button { min-height:44px; }
+    .panel-head button, .mini, .lb-bar button { min-width:44px; }
+    .place-links a { display:inline-flex; align-items:center; min-height:44px; padding:0 4px; }
+  }
+  /* Reduced motion (Windows: Settings > Accessibility > Visual effects > Animation effects off):
+     no blinking, spinning or bouncing; everything shows in its final state. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important;
+                             transition-duration:.01ms !important; scroll-behavior:auto !important; }
   }
 </style>
 </head>
@@ -346,11 +379,13 @@
   <button id="openPlaces" type="button">PLACES</button>
   <button id="openBook" type="button" title="Your collection book">BOOK</button>
   <button id="peek" type="button" title="See the real Google map underneath">PEEK GOOGLE</button>
+  <button id="installApp" type="button" hidden>INSTALL APP</button>
 </div>
 
 <button class="compass" id="compass" type="button" aria-label="Compass. Tap to point the map north.">
   <span class="mode-tag" id="compassTag" hidden></span>
 </button>
+<button class="fs-btn" id="fullscreen" type="button" aria-label="Full screen" aria-pressed="false" hidden></button>
 <div class="settings" id="settings" hidden>
   <div class="box panel" role="dialog" aria-modal="true" aria-label="Settings">
     <div class="panel-head">SETTINGS <button type="button" data-close="settings" aria-label="Close settings">X</button></div>
@@ -466,6 +501,13 @@
   <div class="box panel" role="dialog" aria-modal="true" aria-label="Place details">
     <div class="panel-head"><span id="placeTitle">PLACE</span> <button type="button" data-close="placePanel" aria-label="Close place details">X</button></div>
     <div id="placeBody"></div>
+  </div>
+</div>
+<!-- After the other panels, so it opens on top of SETTINGS. -->
+<div class="settings" id="installPanel" hidden>
+  <div class="box panel" role="dialog" aria-modal="true" aria-label="Install Maps+">
+    <div class="panel-head">INSTALL MAPS+ <button type="button" data-close="installPanel" aria-label="Close">X</button></div>
+    <div class="place-text" id="installHelp"></div>
   </div>
 </div>
 
@@ -1106,9 +1148,10 @@ function renderSettings() {
   }, null, 'SEE THE REAL MAP')];
   if (window.Native && Native.isApp) more.push(choiceButton('PHONE SETTINGS', false, () => Native.openSettings(),
     null, 'LOCATION, BATTERY'));
-  else if (window.PWA) more.push(choiceButton('INSTALL APP', false, async () => {
-    const r = await PWA.install(); if (r === 'accepted') toast('INSTALLED!<br>Find MAPS+ on your home screen'); renderSettings();
-  }, null, PWA.canInstall ? 'ADD TO HOME SCREEN' : 'NOT AVAILABLE HERE', !PWA.canInstall));
+  else if (window.PWA && !PWA.installed) more.push(choiceButton('INSTALL APP', false, installApp, null,
+    PWA.canInstall ? 'OPENS IN ITS OWN WINDOW' : 'HOW TO INSTALL'));
+  if (fsSupported && !appFullscreen()) more.push(choiceButton('FULL SCREEN', fsActive(), toggleFullscreen, null,
+    fsActive() ? 'TAP TO EXIT (OR ESC)' : 'HIDE THE BROWSER BARS'));
   fill('moreActions', more);
 }
 $('openSettings').onclick = () => openPanel('settings', renderSettings);
@@ -1130,8 +1173,71 @@ function togglePeek() {
   if (on) ensureGuard();
 }
 $('peek').onclick = togglePeek;
-// Show / hide INSTALL APP as soon as the browser says installing is possible.
-if (window.PWA) PWA.onChange(() => { if (!$('settings').hidden) renderSettings(); });
+// ---------- install as an app ----------
+// One tap where the browser offers it (Chrome / Edge: beforeinstallprompt); otherwise short menu steps.
+function installHelpHtml() {
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const android = /Android/.test(ua), edge = /Edg(A|iOS)?\//.test(ua), firefox = /Firefox\/|FxiOS/.test(ua);
+  const chrome = !edge && !firefox && /Chrome\/|CriOS/.test(ua) && !/SamsungBrowser|OPR\//.test(ua);
+  const steps = [
+    ['chrome', android ? 'CHROME: 3-DOT MENU (TOP RIGHT) > ADD TO HOME SCREEN > INSTALL' : 'CHROME: 3-DOT MENU (TOP RIGHT) > CAST, SAVE AND SHARE > INSTALL PAGE AS APP'],
+    ['edge', android ? 'EDGE: ... MENU (BOTTOM) > ADD TO PHONE' : 'EDGE: ... MENU (TOP RIGHT) > APPS > INSTALL THIS SITE AS AN APP'],
+    ['ios', 'IPHONE / IPAD: SHARE BUTTON > ADD TO HOME SCREEN'],
+  ];
+  const here = ios ? 'ios' : edge ? 'edge' : chrome ? 'chrome' : null;
+  steps.sort((a, b) => (b[0] === here) - (a[0] === here));
+  return (PWA.installed ? '<p>MAPS+ IS ALREADY INSTALLED.</p>'
+      : '<p>INSTALL MAPS+ SO IT OPENS IN ITS OWN WINDOW, LIKE AN APP, FROM YOUR START MENU OR HOME SCREEN.</p>')
+    + (firefox && !android ? '<p>FIREFOX CAN\'T INSTALL IT: OPEN THIS PAGE IN CHROME OR EDGE.</p>' : '')
+    + '<ol class="install-steps">' + steps.map(([k, t]) => `<li class="${k === here ? 'here' : 'other'}">${t}</li>`).join('') + '</ol>'
+    + '<p>ALREADY INSTALLED? OPEN MAPS+ FROM YOUR APPS INSTEAD OF THE BROWSER.</p>';
+}
+async function installApp() {
+  if (PWA.canInstall) {
+    const r = await PWA.install();
+    if (r === 'accepted') { toast('INSTALLED!<br>OPEN MAPS+ FROM YOUR APPS'); return; }
+    if (r === 'dismissed') return;
+  }
+  openPanel('installPanel', () => { $('installHelp').innerHTML = installHelpHtml(); });
+}
+// The INSTALL APP button on the top bar only shows when one tap will do it, and never once installed.
+function updateInstallUi() {
+  $('installApp').hidden = !(window.PWA && PWA.canInstall && !PWA.installed) || !!(window.Native && Native.isApp);
+  if (!$('settings').hidden) renderSettings();
+}
+$('installApp').onclick = installApp;
+if (window.PWA) PWA.onChange(updateInstallUi);
+updateInstallUi();
+
+// ---------- full screen ----------
+// Hidden where the page can't go full screen (iPhone Safari, the Android app) or already is (installed in full screen).
+const fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && !(window.Native && Native.isApp);
+const fsActive = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const fsAppMode = matchMedia('(display-mode: fullscreen)');
+const appFullscreen = () => !fsActive() && fsAppMode.matches;
+function toggleFullscreen() {
+  const fail = () => toast('FULL SCREEN<br>IS NOT ALLOWED HERE');
+  try {
+    if (fsActive()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+    const el = document.documentElement;
+    const p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el, { navigationUI: 'hide' });
+    if (p && p.catch) p.catch(fail);
+  } catch (e) { fail(); }
+}
+function updateFullscreenUi() {
+  const on = fsActive(), b = $('fullscreen');
+  b.hidden = !fsSupported || appFullscreen();
+  b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
+  b.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen'); b.title = on ? 'Exit full screen' : 'Full screen';
+  placeFloaters();
+  if (!$('settings').hidden) renderSettings();
+}
+$('fullscreen').onclick = toggleFullscreen;
+document.addEventListener('fullscreenchange', updateFullscreenUi);
+document.addEventListener('webkitfullscreenchange', updateFullscreenUi);
+if (fsAppMode.addEventListener) fsAppMode.addEventListener('change', updateFullscreenUi);
+updateFullscreenUi();
 
 // ---------- toasts, XP and badges ----------
 const toastQueue = []; let toastBusy = false;
@@ -1507,6 +1613,11 @@ document.addEventListener('keydown', (e) => {
 let placesLib = null, sessionToken = null, searchTimer = 0, searchSeq = 0;
 const resultsEl = $('results'), searchEl = $('search');
 function hideResults() { resultsEl.hidden = true; resultsEl.replaceChildren(); }
+// Track the visible height (the Windows touch keyboard covers the bottom of the page) for .results.
+if (window.visualViewport) {
+  const setVvh = () => document.documentElement.style.setProperty('--vvh', Math.round(visualViewport.height) + 'px');
+  visualViewport.addEventListener('resize', setVvh); setVvh();
+}
 function resultsNote(text) { resultsEl.innerHTML = `<div class="note">${esc(text)}</div>`; resultsEl.hidden = false; ensureGuard(); }
 searchEl.addEventListener('input', () => {
   clearTimeout(searchTimer);
@@ -1808,7 +1919,15 @@ function updateWatch() {
   }
 }
 function onFixError(e) {
-  if (nav.active) msg(e.code === 1 ? 'Location is blocked.<br>Allow it to navigate.' : 'Looking for GPS signal...');
+  if (nav.active) msg(e.code === 1 ? locationErrorMsg(e) : 'Looking for GPS signal...');
+}
+// Windows laptops have no GPS: the browser asks Windows Location (Wi-Fi based), which can be switched off
+// in Windows Settings even when the browser allows the site, so say where to look.
+function locationErrorMsg(e) {
+  if (window.Native && Native.isApp) return 'Location is off.<br>Allow it in PHONE SETTINGS.';
+  const win = /Windows/.test(navigator.userAgent);
+  if (e && e.code === 1) return win ? 'Location is blocked.<br>Allow it in the browser and in<br>Windows Settings > Location.' : 'Location was blocked.<br>Allow it in the browser.';
+  return win ? 'Could not find you.<br>Turn on Location in Windows<br>Settings, or search a place.' : 'Could not find you.<br>Try again, or search a place.';
 }
 function showNavStep() {
   const s = steps[nav.stepIdx]; if (!s) return;
@@ -2118,6 +2237,7 @@ function placeFloaters() {
   const top = document.body.classList.contains('driving') ? $('driveBanner') : document.querySelector('.hud');
   const y = Math.round(top.getBoundingClientRect().bottom) + 10;
   $('compass').style.top = y + 'px';
+  $('fullscreen').style.top = (y + $('compass').offsetHeight + 22) + 'px';   // room for the compass mode tag
 }
 new ResizeObserver(placeFloaters).observe(document.querySelector('.hud'));
 new ResizeObserver(placeFloaters).observe($('driveBanner'));
@@ -2817,7 +2937,8 @@ window.initMap = () => {
   }
   // Fallback for raster Google maps (no WebGL draw hook): follow camera events plus every frame.
   gmap.addListener('bounds_changed', () => { if (!exact) syncFromCamera(); });
-  (function tick() { if (!exact) syncFromCamera(); requestAnimationFrame(tick); })();
+  // (Stops once the exact hook is drawing, so it doesn't keep a frame loop running on slow laptops.)
+  (function tick() { if (exact) return; syncFromCamera(); requestAnimationFrame(tick); })();
   // Keep both maps the same size at the same moment when the window changes.
   new ResizeObserver(() => { pmap.resize(); last = ''; syncFromCamera(); }).observe(gEl);
   window.__maps = { gmap, pmap, isExact: () => exact };   // handy for debugging alignment
@@ -2883,10 +3004,10 @@ window.initMap = () => {
       movePlayer(pos.lng, pos.lat);
       explore(pos); rememberPos(pos, true);
       msg('Found you!<br>Where do you want to go?');
-    }, () => {
+    }, (err) => {
       if (startup) { if (!dest) msg('Search, or tap a spot,<br>then press GO!'); }
-      else msg((window.Native && Native.isApp) ? 'Location is off.<br>Allow it in PHONE SETTINGS.' : 'Location was blocked.<br>Allow it in the browser.');
-    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+      else msg(locationErrorMsg(err));
+    },{ enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   }
   $('locate').onclick = () => locateMe(false);
   locateMe(true);

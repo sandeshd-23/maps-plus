@@ -6,6 +6,7 @@
   "start_url": "./game-overlay.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
   "orientation": "portrait",
   "background_color": "#22263a",
   "theme_color": "#22263a",

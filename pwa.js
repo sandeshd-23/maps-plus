@@ -16,9 +16,14 @@
   let regPromise = null;
   const listeners = [];
 
+  // Opened as the installed app (any app display mode). 'fullscreen' also matches a browser tab in F11 /
+  // Fullscreen API mode, so only count it when no element was put full screen by the page.
+  const APP_MODES = ['standalone', 'minimal-ui', 'window-controls-overlay', 'fullscreen'];
   function standalone() {
     try {
-      return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+      if (navigator.standalone === true) return true;
+      return APP_MODES.some((m) => window.matchMedia('(display-mode: ' + m + ')').matches &&
+        (m !== 'fullscreen' || !document.fullscreenElement));
     } catch (e) { return false; }
   }
 
@@ -42,11 +47,12 @@
       installedNow = true;
       emit();
     });
-    const mq = window.matchMedia && window.matchMedia('(display-mode: standalone)');
-    if (mq) {
+    APP_MODES.forEach((m) => {
+      const mq = window.matchMedia && window.matchMedia('(display-mode: ' + m + ')');
+      if (!mq) return;
       if (mq.addEventListener) mq.addEventListener('change', emit);
       else if (mq.addListener) mq.addListener(emit);
-    }
+    });
   } catch (e) { /* ignore */ }
 
   window.PWA = {
